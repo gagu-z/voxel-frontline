@@ -124,10 +124,7 @@
 
     /** The build hotbar slots are dead weight when building is off. */
     _setBuildSlots: function (visible) {
-      const slots = document.querySelectorAll('#hotbar .slot.build');
-      for (let i = 0; i < slots.length; i++) {
-        slots[i].classList.toggle('hidden', !visible);
-      }
+      if (VF.UI && VF.UI.setArenaKnifeSlot) VF.UI.setArenaKnifeSlot(!visible);
     },
 
     _bind: function () {

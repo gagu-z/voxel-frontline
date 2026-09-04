@@ -1,11 +1,11 @@
 /**
- * ffa-ui.js — 自由混战 HUD: live leaderboard, kill feed, respawn banner, result.
+ * gg-ui.js — 枪械模式 HUD：个人武器进度条、按等级排序的排行榜、击杀播报、结算。
  *
- * FFA's soul is the live ranking, so this owns a dedicated leaderboard panel
- * (#ffa-rank) that lists every combatant by kills, highlighting the player and
- * crowning the current leader. It reuses the 死斗 feed / banner / result styling
- * (same CSS classes, separate elements) so it adds no team-based UI and never
- * touches the 死斗 HUD.
+ * 枪械模式的 UI 核心是「进度可视化」（文档 第五部分）：玩家随时要看清自己到了
+ * 第几级、下一把是什么、别人到哪了。所以比 自由混战 多一块常驻的个人进度面板。
+ *
+ * 复用 死斗 / 自由混战 的播报、横幅、结算样式（相同 class，独立元素），不碰任何
+ * 队伍制 HUD。
  */
 (function (global) {
   'use strict';
@@ -18,6 +18,7 @@
     shownClock: -1,
     shownBanner: '',
     rankSig: '',
+    progressSig: '',
   };
 
   function els() {
@@ -25,16 +26,17 @@
     state.els = {
       timer: document.getElementById('timer'),
       target: document.getElementById('match-target'),
-      rank: document.getElementById('ffa-rank'),
-      feed: document.getElementById('ffa-feed'),
-      banner: document.getElementById('ffa-banner'),
-      result: document.getElementById('ffa-result'),
-      resultTitle: document.getElementById('ffa-result-title'),
-      resultReason: document.getElementById('ffa-result-reason'),
-      resultPlace: document.getElementById('ffa-result-place'),
-      resultRows: document.getElementById('ffa-result-rows'),
-      resultBack: document.getElementById('ffa-result-back'),
-      resultCountdown: document.getElementById('ffa-result-countdown'),
+      progress: document.getElementById('gg-progress'),
+      rank: document.getElementById('gg-rank'),
+      feed: document.getElementById('gg-feed'),
+      banner: document.getElementById('gg-banner'),
+      result: document.getElementById('gg-result'),
+      resultTitle: document.getElementById('gg-result-title'),
+      resultReason: document.getElementById('gg-result-reason'),
+      resultPlace: document.getElementById('gg-result-place'),
+      resultRows: document.getElementById('gg-result-rows'),
+      resultBack: document.getElementById('gg-result-back'),
+      resultCountdown: document.getElementById('gg-result-countdown'),
     };
     return state.els;
   }
@@ -58,19 +60,18 @@
       state.shownClock = -1;
       state.shownBanner = '';
       state.rankSig = '';
-      if (e.rank) {
-        e.rank.classList.remove('hidden');
-        e.rank.innerHTML = '';
+      state.progressSig = '';
+      const panels = [e.progress, e.rank, e.feed];
+      for (let i = 0; i < panels.length; i++) {
+        if (!panels[i]) continue;
+        panels[i].classList.remove('hidden');
+        panels[i].innerHTML = '';
       }
-      if (e.feed) {
-        e.feed.classList.remove('hidden');
-        e.feed.innerHTML = '';
-      }
-      const limit = (VF.FfaMatch && VF.FfaMatch.scoreLimit) || 30;
-      if (e.target) e.target.textContent = limit;
+      const levels = (VF.GgMatch && VF.GgMatch.levelCount()) || 0;
+      if (e.target) e.target.textContent = levels;
       const objective = document.getElementById('objective');
-      if (objective) objective.textContent = '自由混战 · 先达 ' + limit + ' 杀';
-      if (VF.UI && VF.UI.claimClock) VF.UI.claimClock('ffa');
+      if (objective) objective.textContent = '枪械模式 · 打通 ' + levels + ' 把武器';
+      if (VF.UI && VF.UI.claimClock) VF.UI.claimClock('gungame');
       this._setBuildSlots(false);
       this.hideResult();
       this._bind();
@@ -79,14 +80,12 @@
     leave: function () {
       const e = els();
       if (!e) return;
-      if (VF.UI && VF.UI.releaseClock) VF.UI.releaseClock('ffa');
-      if (e.rank) {
-        e.rank.classList.add('hidden');
-        e.rank.innerHTML = '';
-      }
-      if (e.feed) {
-        e.feed.classList.add('hidden');
-        e.feed.innerHTML = '';
+      if (VF.UI && VF.UI.releaseClock) VF.UI.releaseClock('gungame');
+      const panels = [e.progress, e.rank, e.feed];
+      for (let i = 0; i < panels.length; i++) {
+        if (!panels[i]) continue;
+        panels[i].classList.add('hidden');
+        panels[i].innerHTML = '';
       }
       if (e.banner) e.banner.classList.add('hidden');
       this._setBuildSlots(true);
@@ -94,7 +93,9 @@
     },
 
     _setBuildSlots: function (visible) {
-      if (VF.UI && VF.UI.setArenaKnifeSlot) VF.UI.setArenaKnifeSlot(!visible);
+      if (VF.UI && VF.UI.setArenaKnifeSlot) VF.UI.setArenaKnifeSlot(false);
+      const slots = document.querySelectorAll('#hotbar .slot.build');
+      for (let i = 0; i < slots.length; i++) slots[i].classList.toggle('hidden', !visible);
     },
 
     _bind: function () {
@@ -105,7 +106,7 @@
         e.resultBack.addEventListener('click', function (ev) {
           ev.preventDefault();
           Ui.hideResult();
-          if (VF.FfaMatch) VF.FfaMatch.stop();
+          if (VF.GgMatch) VF.GgMatch.stop();
           if (VF.FfaSpawn) VF.FfaSpawn.stop();
           if (VF.game && VF.game.returnFromMatch) VF.game.returnFromMatch();
         });
@@ -125,11 +126,59 @@
         if (e.timer) e.timer.textContent = mmss(clockSec);
       }
 
+      this._renderProgress(match);
       this._renderRank(match);
       this._syncBanner(match);
     },
 
-    /* ─────────────────────── live leaderboard ─────────────────────── */
+    /* ───────────────────── 个人进度（文档 5.1） ───────────────────── */
+
+    _renderProgress: function (match) {
+      const e = els();
+      if (!e || !e.progress) return;
+      const me = match.playerStats();
+      if (!me) return;
+
+      const total = match.levelCount();
+      const final = match.finalLevel();
+      const atFinal = me.level >= final;
+      const sig = me.level + '/' + total + (atFinal ? 'F' : '');
+      if (sig === state.progressSig) return;
+      state.progressSig = sig;
+
+      e.progress.innerHTML = '';
+      e.progress.classList.toggle('final', atFinal);
+
+      const head = document.createElement('div');
+      head.className = 'gg-progress-head';
+      head.textContent = 'Lv' + me.level + ' · ' + match.labelAt(me.level);
+      e.progress.appendChild(head);
+
+      const bar = document.createElement('div');
+      bar.className = 'gg-progress-bar';
+      for (let i = 0; i < total; i++) {
+        const cell = document.createElement('span');
+        cell.className = 'gg-progress-cell';
+        if (i < me.level) cell.classList.add('done');
+        else if (i === me.level) cell.classList.add('current');
+        if (i === final) cell.classList.add('final');
+        bar.appendChild(cell);
+      }
+      e.progress.appendChild(bar);
+
+      const foot = document.createElement('div');
+      foot.className = 'gg-progress-foot';
+      if (atFinal) {
+        foot.classList.add('final');
+        foot.textContent = '最后一击 · ' + match.labelAt(final);
+      } else {
+        foot.textContent =
+          me.level + '/' + final + ' · 下一把 ' + match.labelAt(me.level + 1);
+      }
+      e.progress.appendChild(foot);
+    },
+
+    /* ─────────────── 排行榜：按武器等级排序（文档 5.3） ─────────────── */
 
     _renderRank: function (match) {
       const e = els();
@@ -137,20 +186,20 @@
       const rows = match.ranking();
       const leaderId = match.leaderMarkerOn() ? match.leaderId() : null;
 
-      // Cheap change-detection so the panel is not rebuilt every frame
       let sig = leaderId || '';
-      for (let i = 0; i < rows.length; i++) sig += '|' + rows[i].id + ':' + rows[i].kills;
+      for (let i = 0; i < rows.length; i++) sig += '|' + rows[i].id + ':' + rows[i].level;
       if (sig === state.rankSig) return;
       state.rankSig = sig;
 
-      const limit = match.scoreLimit || 30;
-      const leaderKills = rows.length ? rows[0].kills : 0;
+      const total = match.levelCount();
+      const final = match.finalLevel();
+      const leadLevel = rows.length ? rows[0].level : 0;
 
       e.rank.innerHTML = '';
       const head = document.createElement('div');
       head.className = 'ffa-rank-head';
       const pr = match.playerRank();
-      head.textContent = '排行榜 · ' + (pr ? ordinal(pr) : '—') + ' / ' + rows.length + ' 人';
+      head.textContent = '武器进度 · ' + (pr ? ordinal(pr) : '—') + ' / ' + rows.length + ' 人';
       e.rank.appendChild(head);
 
       for (let i = 0; i < rows.length; i++) {
@@ -170,26 +219,36 @@
         name.textContent = (leaderId && r.id === leaderId ? '♛ ' : '') + r.name;
         row.appendChild(name);
 
-        const kills = document.createElement('span');
-        kills.className = 'ffa-rank-kills';
-        kills.textContent = r.kills;
-        if (r.kills >= limit * 0.8) kills.classList.add('critical');
-        row.appendChild(kills);
+        // 迷你进度条：一眼看出谁快通关了
+        const mini = document.createElement('span');
+        mini.className = 'gg-rank-bar';
+        const fill = document.createElement('span');
+        fill.className = 'gg-rank-fill';
+        fill.style.width = Math.round((r.level / Math.max(1, final)) * 100) + '%';
+        if (r.level >= final) fill.classList.add('final');
+        mini.appendChild(fill);
+        row.appendChild(mini);
+
+        const lv = document.createElement('span');
+        lv.className = 'ffa-rank-kills';
+        lv.textContent = 'Lv' + r.level;
+        if (r.level >= final) lv.classList.add('critical');
+        row.appendChild(lv);
 
         e.rank.appendChild(row);
       }
 
       const gap = document.createElement('div');
       gap.className = 'ffa-rank-foot';
-      if (pr > 1) {
-        const me = match.playerStats();
-        const need = me ? Math.max(1, leaderKills - me.kills) : leaderKills;
-        gap.textContent = '距第一 ' + need + ' 杀';
+      const me = match.playerStats();
+      if (pr > 1 && me) {
+        gap.textContent = '距第一 ' + Math.max(1, leadLevel - me.level) + ' 级';
       } else if (pr === 1) {
-        gap.textContent = '你处于领先 · 众矢之的';
         gap.classList.add('leading');
+        gap.textContent = '你领先全场 · 小心被爆头降级';
       }
       e.rank.appendChild(gap);
+      void total;
     },
 
     _syncBanner: function (match) {
@@ -235,9 +294,14 @@
         row.appendChild(verbSpan('阵亡'));
       } else {
         row.appendChild(nameSpan(entry.killer, entry.killerIsPlayer));
-        row.appendChild(verbSpan('击杀'));
+        row.appendChild(verbSpan(entry.leveled ? '升级击杀' : '击杀'));
         row.appendChild(nameSpan(entry.victim, entry.victimIsPlayer));
-        if (entry.headshot) {
+        if (entry.demoted) {
+          const tag = document.createElement('span');
+          tag.className = 'tdm-feed-hs gg-feed-demote';
+          tag.textContent = '爆头降级';
+          row.appendChild(tag);
+        } else if (entry.headshot) {
           const hs = document.createElement('span');
           hs.className = 'tdm-feed-hs';
           hs.textContent = '爆头';
@@ -250,7 +314,7 @@
 
       function nameSpan(text, isPlayer) {
         const s = document.createElement('span');
-        // Self is blue, everyone else is red — the FFA identity rule.
+        // Self is blue, everyone else is red — the teamless identity rule.
         s.className = 'tdm-feed-name ' + (isPlayer ? 'blue' : 'red');
         s.textContent = text || '?';
         return s;
@@ -263,9 +327,14 @@
       }
     },
 
-    onStreak: function (row, label) {
+    onLevel: function (row) {
       void row;
-      void label;
+      state.progressSig = '';
+    },
+
+    onDemote: function (row) {
+      void row;
+      state.progressSig = '';
     },
 
     onRespawn: function (pick, protect) {
@@ -274,23 +343,30 @@
       state.shownBanner = '';
     },
 
-    /* ────────────────────────── result panel ──────────────────────── */
+    /* ─────────────── 结算：按武器等级排名（文档 7.2） ─────────────── */
 
     showResult: function (match, won) {
       const e = els();
       if (!e || !e.result) return;
       const rows = match.ranking();
       const pr = match.playerRank();
+      const me = match.playerStats();
+      const final = match.finalLevel();
 
       if (e.resultTitle) {
-        e.resultTitle.textContent = won ? '冠军' : '本局结束';
+        e.resultTitle.textContent = won ? '军械库大师' : '本局结束';
         e.resultTitle.classList.toggle('lose', !won);
       }
       if (e.resultReason) e.resultReason.textContent = match.endReason || '';
       if (e.resultPlace) {
-        e.resultPlace.textContent = pr
-          ? ordinal(pr) + ' / 共 ' + rows.length + ' 人'
-          : '';
+        if (won) {
+          e.resultPlace.textContent = '你打通了军械库 · 用时 ' + mmss(me ? me.finishedAt : 0);
+        } else if (pr && me) {
+          e.resultPlace.textContent =
+            ordinal(pr) + ' / 共 ' + rows.length + ' 人 · 到达 Lv' + me.level;
+        } else {
+          e.resultPlace.textContent = '';
+        }
       }
 
       if (e.resultRows) {
@@ -299,16 +375,17 @@
           const r = rows[i];
           const tr = document.createElement('tr');
           tr.className = (i === 0 ? 'champion' : '') + (r.isPlayer ? ' me' : '');
-          const kd = r.deaths > 0 ? (r.kills / r.deaths).toFixed(2) : r.kills.toFixed(2);
+          const levelTxt = r.finishedAt
+            ? '通关(' + final + ')'
+            : 'Lv' + r.level + ' ' + match.labelAt(r.level);
           const cells = [
             i + 1,
             (i === 0 ? '♛ ' : '') + r.name,
+            levelTxt,
             r.kills,
-            r.deaths,
-            kd,
-            r.headshots,
-            r.bestStreak,
-            r.score,
+            r.demotes,
+            r.demoted,
+            match.stuckWeaponOf(r),
           ];
           for (let c = 0; c < cells.length; c++) {
             const td = document.createElement('td');
@@ -337,5 +414,5 @@
     },
   };
 
-  VF.FfaUi = Ui;
+  VF.GgUi = Ui;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -61,6 +61,9 @@
       this.scoreLimit = p.scoreLimit != null ? p.scoreLimit : 30;
 
       this.ensure('player', { name: '你', isPlayer: true });
+      if (VF.game && VF.game.mode === 'pvp') {
+        this.ensure('remote', { name: '对手' });
+      }
       return this;
     },
 
@@ -68,6 +71,7 @@
       this.active = false;
       this.phase = PHASE_PREP;
       this.feed = [];
+      if (VF.FfaMarker && VF.FfaMarker.stop) VF.FfaMarker.stop();
     },
 
     isRunning: function () {
@@ -108,7 +112,7 @@
 
     idOf: function (actor) {
       if (!actor) return null;
-      if (actor === 'player') return 'player';
+      if (actor === 'player' || actor === 'remote') return actor;
       if (actor.isPlayer || (VF.game && actor === VF.game.player)) return 'player';
       return actor.id || null;
     },
@@ -117,6 +121,7 @@
       const id = this.idOf(actor);
       if (!id) return null;
       if (id === 'player') return this.ensure('player', { name: '你', isPlayer: true });
+      if (id === 'remote') return this.ensure('remote', { name: '对手' });
       return this.ensure(id, { name: actor.name || id });
     },
 
@@ -126,6 +131,7 @@
      * Recycled ids mean a respawn reuses its slot instead of adding a row.
      */
     _ensureRoster: function () {
+      if (VF.game && VF.game.mode === 'pvp') this.ensure('remote', { name: '对手' });
       const ai = VF.game && VF.game.ai;
       if (!ai) return;
       const lists = [ai.blue, ai.red];
@@ -242,9 +248,14 @@
       const prev = this._shownRank;
       this._shownRank = rank;
       if (!prev) return; // first placement — nothing to compare against yet
-      if (VF.UI && VF.UI.toast) {
-        if (rank < prev) VF.UI.toast('升至第 ' + rank + ' 名');
-        else VF.UI.toast('被超越 · 降至第 ' + rank + ' 名');
+      if (!(VF.UI && VF.UI.toast)) return;
+      if (rank === 1 && prev !== 1 && this.leaderMarkerOn()) {
+        // 枪打出头鸟:登顶即成为全场追杀目标（头顶皇冠对所有人可见）
+        VF.UI.toast('登顶第一 · 你已成为众矢之的');
+      } else if (rank < prev) {
+        VF.UI.toast('升至第 ' + rank + ' 名');
+      } else {
+        VF.UI.toast('被超越 · 降至第 ' + rank + ' 名');
       }
     },
 
@@ -254,6 +265,7 @@
       if (!this.active) return;
 
       if (this.ended) {
+        if (VF.FfaMarker && VF.FfaMarker.hide) VF.FfaMarker.hide();
         if (this.phaseLeft > 0) {
           this.phaseLeft = Math.max(0, this.phaseLeft - dt);
           if (VF.FfaUi && VF.FfaUi.syncResultCountdown) {
@@ -291,6 +303,7 @@
       if (this.phase === PHASE_BATTLE) {
         this._clock += dt;
         this.timeLeft = Math.max(0, this.timeLeft - dt);
+        if (VF.FfaMarker && VF.FfaMarker.sync) VF.FfaMarker.sync(dt);
         if (this.timeLeft <= 0) this._onTimeExpired();
       }
 

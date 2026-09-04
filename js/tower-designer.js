@@ -343,6 +343,7 @@
       if (world.get(wcell.x, wcell.y, wcell.z) === global.VF.BLOCK.AIR) {
         const t = design.cells[k];
         world.set(wcell.x, wcell.y, wcell.z, t);
+        if (world.markManmade) world.markManmade(wcell.x, wcell.y, wcell.z);
         const base = typeHits[t] != null ? typeHits[t] : 1;
         const total = base > 0 ? base + extraHits : 0;
         if (total > 1 && world.setBlockDurability) {

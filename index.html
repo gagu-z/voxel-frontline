@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <div id="throw-flash" aria-hidden="true"></div>
+  <div id="throw-stun" aria-hidden="true"></div>
+  <div id="throw-smoke-veil" aria-hidden="true"></div>
   <button id="audio-toggle" type="button" title="静音" aria-label="切换声音" aria-pressed="false">
     <span class="audio-icon" aria-hidden="true"></span>
   </button>
@@ -130,6 +133,50 @@
     </div>
   </div>
 
+  <!-- 自由混战 result: personal placement + full ranking table -->
+  <div id="ffa-result" class="tdm-result hidden" role="dialog" aria-modal="true" aria-labelledby="ffa-result-title">
+    <div class="tdm-result-panel">
+      <p class="tdm-result-kicker">自由混战</p>
+      <h2 id="ffa-result-title" class="tdm-result-title">冠军</h2>
+      <p id="ffa-result-place" class="ffa-result-place"></p>
+      <p id="ffa-result-reason" class="tdm-result-reason"></p>
+      <div class="tdm-table-wrap">
+        <table class="tdm-table">
+          <thead>
+            <tr><th>名次</th><th>玩家</th><th>击杀</th><th>死亡</th><th>K/D</th><th>爆头</th><th>连杀</th><th>得分</th></tr>
+          </thead>
+          <tbody id="ffa-result-rows"></tbody>
+        </table>
+      </div>
+      <div class="tdm-result-actions">
+        <span id="ffa-result-countdown" class="tdm-result-countdown"></span>
+        <button type="button" id="ffa-result-back" class="cover-btn cover-btn-start">返回基地</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 枪械模式 result: 按最终武器等级排名 -->
+  <div id="gg-result" class="tdm-result hidden" role="dialog" aria-modal="true" aria-labelledby="gg-result-title">
+    <div class="tdm-result-panel">
+      <p class="tdm-result-kicker">枪械模式</p>
+      <h2 id="gg-result-title" class="tdm-result-title">军械库大师</h2>
+      <p id="gg-result-place" class="ffa-result-place"></p>
+      <p id="gg-result-reason" class="tdm-result-reason"></p>
+      <div class="tdm-table-wrap">
+        <table class="tdm-table">
+          <thead>
+            <tr><th>名次</th><th>玩家</th><th>最终等级</th><th>击杀</th><th>爆头降级</th><th>被降级</th><th>卡关武器</th></tr>
+          </thead>
+          <tbody id="gg-result-rows"></tbody>
+        </table>
+      </div>
+      <div class="tdm-result-actions">
+        <span id="gg-result-countdown" class="tdm-result-countdown"></span>
+        <button type="button" id="gg-result-back" class="cover-btn cover-btn-start">返回基地</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Match mode picker: shown before both PVE and PVP entries -->
   <div id="mode-select-overlay" class="mode-select hidden" role="dialog" aria-modal="true" aria-labelledby="mode-hero-name">
     <div class="mode-hero" id="mode-hero">
@@ -238,7 +285,7 @@
             <li><kbd>Shift</kbd> — 冲刺 · <kbd>Ctrl</kbd> — 蹲下（蹲下不能冲刺，头顶有障碍时松开也不会站起）</li>
             <li><kbd>空格</kbd> — 跳跃 · 鼠标 — 视角 · <kbd>Esc</kbd> — 释放鼠标</li>
             <li><kbd>左键</kbd> — 射击 · <kbd>右键</kbd> — 瞄准（ADS，散布更小）</li>
-            <li><kbd>R</kbd> — 换弹 · <kbd>V</kbd> — 冲刺（准星方向） · <kbd>G</kbd> — 先锋 C4（按住瞄准） · <kbd>Tab</kbd> — 背包 · <kbd>M</kbd> — 大地图</li>
+            <li><kbd>R</kbd> — 换弹 · <kbd>V</kbd> — 冲刺（准星方向） · <kbd>G</kbd> — 先锋 C4（按住瞄准） · <kbd>Q</kbd> — 投掷（滚轮切换种类） · <kbd>Tab</kbd> — 背包 · <kbd>M</kbd> — 大地图</li>
             <li><kbd>E</kbd> — 拾取部署核 / 掩体建材 · <kbd>F</kbd> — 乘坐滑索</li>
           </ul>
         </section>
@@ -310,6 +357,17 @@
     <!-- 死斗: kill feed + phase banner + team score numbers -->
     <div id="tdm-feed" class="tdm-feed hidden" aria-live="polite"></div>
     <div id="tdm-banner" class="tdm-banner hidden" aria-live="polite"></div>
+
+    <!-- 自由混战: live leaderboard (left) + kill feed / banner (reuse 死斗 styling) -->
+    <div id="ffa-rank" class="ffa-rank hidden" aria-hidden="true"></div>
+    <div id="ffa-feed" class="tdm-feed hidden" aria-live="polite"></div>
+    <div id="ffa-banner" class="tdm-banner hidden" aria-live="polite"></div>
+
+    <!-- 枪械模式: 个人武器进度条 + 按等级排序的排行榜 + 击杀播报 / 横幅 -->
+    <div id="gg-progress" class="gg-progress hidden" aria-live="polite"></div>
+    <div id="gg-rank" class="ffa-rank gg-rank hidden" aria-hidden="true"></div>
+    <div id="gg-feed" class="tdm-feed hidden" aria-live="polite"></div>
+    <div id="gg-banner" class="tdm-banner hidden" aria-live="polite"></div>
 
     <!-- 爆破: contextual plant / defuse / drop / pickup prompt with progress -->
     <div id="sd-prompt" class="sd-prompt hidden" aria-live="polite">
@@ -503,6 +561,71 @@
         </div>
         <div class="skill-keybind skill-keybind-passive">被动</div>
       </div>
+    </div>
+
+    <!-- Throwables (debug: unlimited + in-match swap). Same left-bottom icon language as skills. -->
+    <div id="throw-hud" class="hidden" aria-label="投掷物">
+      <button type="button" class="skill-slot throw-slot" data-throw-id="frag" title="破片手雷">
+        <div class="skill-icon-wrap">
+          <div class="skill-icon throw-icon throw-icon-frag" aria-hidden="true">
+            <span class="th-body"></span>
+            <span class="th-pin"></span>
+          </div>
+          <div class="skill-cd-overlay throw-cook hidden" data-throw-cook></div>
+        </div>
+        <div class="skill-keybind">Q</div>
+      </button>
+      <button type="button" class="skill-slot throw-slot" data-throw-id="semtex" title="黏性炸弹">
+        <div class="skill-icon-wrap">
+          <div class="skill-icon throw-icon throw-icon-semtex" aria-hidden="true">
+            <span class="th-body"></span>
+            <span class="th-led"></span>
+          </div>
+          <div class="skill-cd-overlay throw-cook hidden" data-throw-cook></div>
+        </div>
+        <div class="skill-keybind">Q</div>
+      </button>
+      <button type="button" class="skill-slot throw-slot" data-throw-id="molotov" title="燃烧瓶">
+        <div class="skill-icon-wrap">
+          <div class="skill-icon throw-icon throw-icon-molotov" aria-hidden="true">
+            <span class="th-bottle"></span>
+            <span class="th-flame"></span>
+          </div>
+          <div class="skill-cd-overlay throw-cook hidden" data-throw-cook></div>
+        </div>
+        <div class="skill-keybind">Q</div>
+      </button>
+      <button type="button" class="skill-slot throw-slot" data-throw-id="flash" title="闪光弹">
+        <div class="skill-icon-wrap">
+          <div class="skill-icon throw-icon throw-icon-flash" aria-hidden="true">
+            <span class="th-body"></span>
+            <span class="th-burst"></span>
+          </div>
+          <div class="skill-cd-overlay throw-cook hidden" data-throw-cook></div>
+        </div>
+        <div class="skill-keybind">Q</div>
+      </button>
+      <button type="button" class="skill-slot throw-slot" data-throw-id="stun" title="震撼弹">
+        <div class="skill-icon-wrap">
+          <div class="skill-icon throw-icon throw-icon-stun" aria-hidden="true">
+            <span class="th-body"></span>
+            <span class="th-wave"></span>
+          </div>
+          <div class="skill-cd-overlay throw-cook hidden" data-throw-cook></div>
+        </div>
+        <div class="skill-keybind">Q</div>
+      </button>
+      <button type="button" class="skill-slot throw-slot" data-throw-id="smoke" title="烟雾弹">
+        <div class="skill-icon-wrap">
+          <div class="skill-icon throw-icon throw-icon-smoke" aria-hidden="true">
+            <span class="th-can"></span>
+            <span class="th-puff a"></span>
+            <span class="th-puff b"></span>
+          </div>
+          <div class="skill-cd-overlay throw-cook hidden" data-throw-cook></div>
+        </div>
+        <div class="skill-keybind">Q</div>
+      </button>
     </div>
 
     <!-- Bottom left: resources -->
@@ -922,13 +1045,22 @@
   <script src="js/sd-net.js"></script>
   <script src="js/sd-stats.js"></script>
   <script src="js/sd-result.js"></script>
+  <script src="js/ffa-match.js"></script>
+  <script src="js/ffa-spawn.js"></script>
+  <script src="js/ffa-marker.js"></script>
+  <script src="js/ffa-ui.js"></script>
+  <script src="js/gg-match.js"></script>
+  <script src="js/gg-ui.js"></script>
   <script src="js/voxel-world.js"></script>
+  <script src="js/terrain-fine.js"></script>
   <script src="js/world-outskirts.js"></script>
   <script src="js/bases.js"></script>
   <script src="js/soldier.js"></script>
   <script src="js/player.js"></script>
   <script src="js/weapons.js"></script>
+  <script src="js/melee.js"></script>
   <script src="js/skills.js"></script>
+  <script src="js/throwables.js"></script>
   <script src="js/building.js"></script>
   <script src="js/tower-designer.js"></script>
   <script src="js/hub.js"></script>

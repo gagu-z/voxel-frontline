@@ -19,14 +19,34 @@
   const NEAREST_WEIGHT = 2.4;
   const EYE_Y = 1.5;
 
+  /**
+   * 枪械模式复用这套复活选点（同为无队伍混战，出生规则一致），所以参数读的是
+   * 「当前无队伍模式」的配置，而不是写死 'ffa'。
+   */
   function params() {
-    return VF.GameModes ? VF.GameModes.getParams('ffa') : {};
+    if (!VF.GameModes) return {};
+    const gg = VF.GameModes.isGg && VF.GameModes.isGg();
+    return VF.GameModes.getParams(gg ? 'gungame' : 'ffa');
   }
 
-  /** Combatant count including the player; AI target is this minus one. */
+  /** 当前拥有这场对局的无队伍计分模块。 */
+  function scorer() {
+    if (VF.GgMatch && VF.GgMatch.active) return VF.GgMatch;
+    return VF.FfaMatch;
+  }
+
+  /** Combatant count including humans; AI target is this minus human slots. */
   function combatants() {
     const p = params();
     return Math.max(2, p.combatants != null ? p.combatants : 8);
+  }
+
+  function humanSlots() {
+    return VF.game && VF.game.mode === 'pvp' ? 2 : 1;
+  }
+
+  function aiTarget() {
+    return Math.max(0, combatants() - humanSlots());
   }
 
   const AI_SPAWN_PER_TICK = 2;
@@ -118,7 +138,7 @@
         state.playerDeaths.shift();
       }
 
-      const match = VF.FfaMatch;
+      const match = scorer();
       if (match && match.scoringLive()) this._reinforceAi();
 
       if (!state.waiting) return;
@@ -137,13 +157,13 @@
 
     /* ──────────────────────── AI reinforcements ────────────────────── */
 
-    /** Refill the AI roster to (combatants − 1), reusing the safety scoring. */
+    /** Refill the AI roster to (combatants − humans), reusing the safety scoring. */
     _reinforceAi: function () {
       if (!state.aiQueue.length) return;
       const g = VF.game;
       const ai = g && g.ai;
       if (!ai || !ai.spawnReinforcement) return;
-      const target = Math.max(0, combatants() - 1);
+      const target = aiTarget();
 
       let spawned = 0;
       for (let i = 0; i < state.aiQueue.length && spawned < AI_SPAWN_PER_TICK; ) {
@@ -192,7 +212,8 @@
           : 1.5;
       g.player.spawnProtect = protect;
 
-      if (VF.FfaUi && VF.FfaUi.onRespawn) VF.FfaUi.onRespawn(pick, protect);
+      const ui = VF.GgMatch && VF.GgMatch.active ? VF.GgUi : VF.FfaUi;
+      if (ui && ui.onRespawn) ui.onRespawn(pick, protect);
       return pick;
     },
 

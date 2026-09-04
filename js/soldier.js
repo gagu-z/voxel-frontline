@@ -1000,6 +1000,266 @@
     return { root, gun, muzzle, flash, rightArm: arm, leftArm: lArm };
   }
 
+  function viewModelSleeveColors(classId) {
+    let skin = PALETTE.skin;
+    let skinDark = 0xa88860;
+    let sleeveA = 0x4a5c28;
+    let sleeveB = 0x2f3d1c;
+    if (classId === 'medic') {
+      skin = PALETTE.skinLight;
+      skinDark = 0xc4a882;
+      sleeveA = 0xe8e8e8;
+      sleeveB = 0xc8c8c8;
+    } else if (classId === 'ghost') {
+      sleeveA = PALETTE.ghillie;
+      sleeveB = PALETTE.ghillieDark;
+    } else if (classId === 'juggernaut') {
+      sleeveA = PALETTE.plate;
+      sleeveB = PALETTE.charcoal;
+    } else if (classId === 'raider') {
+      sleeveA = skin;
+      sleeveB = skinDark;
+    } else if (classId === 'engineer') {
+      sleeveA = PALETTE.oliveDark;
+      sleeveB = PALETTE.charcoal;
+    }
+    return { skin: skin, skinDark: skinDark, sleeveA: sleeveA, sleeveB: sleeveB };
+  }
+
+  /**
+   * FPS combat knife: right fist on the handle, forearm from lower-right,
+   * blade toward the crosshair. Left fist stays in a ready guard.
+   */
+  function createKnifeViewModel(classId) {
+    classId = classId || 'vanguard';
+    const pal = viewModelSleeveColors(classId);
+    const b = viewBox;
+    const skin = pal.skin;
+    const skinDark = pal.skinDark;
+    const sleeveA = pal.sleeveA;
+    const sleeveB = pal.sleeveB;
+
+    const root = new THREE.Group();
+    root.name = 'ViewKnife';
+    root.frustumCulled = false;
+
+    const slash = new THREE.Group();
+    slash.name = 'ViewKnifeSlash';
+    slash.frustumCulled = false;
+
+    // ---- Blade + handle (local Z = blade forward) ----
+    const blade = new THREE.Group();
+    blade.name = 'ViewKnifeBlade';
+    blade.add(b(0.042, 0.048, 0.16, 0x5a3a22, 0, 0, 0.05));
+    blade.add(b(0.036, 0.04, 0.045, 0x3a2418, 0, 0, 0.14));
+    blade.add(b(0.1, 0.022, 0.032, 0x2a2a2a, 0, 0, -0.04));
+    blade.add(b(0.03, 0.078, 0.26, 0xc8cdd4, 0, 0.01, -0.18));
+    blade.add(b(0.02, 0.048, 0.1, 0xe8eef4, 0, 0.018, -0.34));
+    blade.add(b(0.014, 0.028, 0.05, 0xf4f7fa, 0, 0.02, -0.4));
+
+    // ---- Right fist wrapping the handle ----
+    const rHand = new THREE.Group();
+    rHand.name = 'ViewKnifeHand';
+    rHand.add(b(0.13, 0.1, 0.12, skin, 0.01, -0.01, 0.04));
+    rHand.add(b(0.12, 0.08, 0.1, skinDark, 0.01, -0.03, 0.05));
+    rHand.add(b(0.038, 0.09, 0.042, skin, -0.05, -0.08, 0.03));
+    rHand.add(b(0.038, 0.1, 0.042, skin, -0.012, -0.09, 0.03));
+    rHand.add(b(0.038, 0.1, 0.042, skin, 0.026, -0.09, 0.03));
+    rHand.add(b(0.038, 0.08, 0.042, skin, 0.062, -0.07, 0.03));
+    rHand.add(b(0.042, 0.042, 0.07, skin, 0.08, 0.03, -0.01));
+    rHand.add(b(0.036, 0.036, 0.05, skinDark, 0.09, 0.03, -0.05));
+    blade.position.set(0.01, 0.03, -0.02);
+    blade.rotation.set(-0.12, 0.08, 0.18);
+    rHand.add(blade);
+
+    // ---- Right forearm from lower-right into the fist ----
+    const arm = new THREE.Group();
+    arm.name = 'ViewKnifeArm';
+    arm.frustumCulled = false;
+    addCheckeredSleeve(arm, 0, 0.08, 0, 0.22, 'y');
+    arm.add(b(0.14, 0.06, 0.14, sleeveA, 0, 0.18, 0));
+    arm.add(b(0.13, 0.16, 0.13, skin, 0.01, -0.1, 0.03));
+    arm.add(b(0.12, 0.08, 0.12, skinDark, 0.01, -0.2, 0.04));
+    arm.position.set(0.16, -0.16, 0.14);
+    arm.rotation.set(0.62, 0.12, -0.48);
+
+    rHand.position.set(0.12, -0.12, -0.14);
+    rHand.rotation.set(0.18, 0.28, 0.38);
+
+    slash.add(arm);
+    slash.add(rHand);
+
+    // ---- Left fist, ready / guard (no blade) ----
+    const lArm = new THREE.Group();
+    lArm.name = 'ViewKnifeLeftArm';
+    lArm.frustumCulled = false;
+    addCheckeredSleeve(lArm, 0, 0.04, 0, 0.18, 'y');
+    lArm.add(b(0.13, 0.05, 0.13, sleeveB, 0, 0.13, 0));
+    lArm.add(b(0.12, 0.14, 0.12, skin, -0.01, -0.1, 0.04));
+    lArm.add(b(0.11, 0.08, 0.11, skinDark, -0.01, -0.2, 0.05));
+    lArm.add(b(0.1, 0.08, 0.1, skin, -0.02, -0.28, 0.06));
+    lArm.add(b(0.032, 0.07, 0.035, skin, -0.06, -0.34, 0.04));
+    lArm.add(b(0.032, 0.07, 0.035, skin, -0.02, -0.35, 0.04));
+    lArm.add(b(0.032, 0.06, 0.035, skin, 0.02, -0.33, 0.04));
+    lArm.position.set(-0.16, -0.2, -0.02);
+    lArm.rotation.set(0.95, 0.38, 0.52);
+
+    root.add(slash);
+    root.add(lArm);
+    root.userData.classId = classId;
+    root.userData.slash = slash;
+    root.userData.rest = {
+      x: slash.position.x,
+      y: slash.position.y,
+      z: slash.position.z,
+      rx: slash.rotation.x,
+      ry: slash.rotation.y,
+      rz: slash.rotation.z,
+    };
+    return root;
+  }
+
+  /**
+   * FPS lethal/tactical: camera-space viewmodel in the lower-right, same
+   * occupancy as the rifle. Throwables.js animates the root through
+   * draw / cook / throw — the nade must stay on-screen while charging.
+   */
+  function createThrowableViewModel(classId) {
+    classId = classId || 'vanguard';
+    const pal = viewModelSleeveColors(classId);
+    const b = viewBox;
+    const skin = pal.skin;
+    const skinDark = pal.skinDark;
+    const sleeveA = pal.sleeveA;
+    const sleeveB = pal.sleeveB;
+
+    const root = new THREE.Group();
+    root.name = 'ViewThrowable';
+    root.frustumCulled = false;
+    root.position.set(0.2, -0.22, -0.44);
+
+    const rig = new THREE.Group();
+    rig.name = 'ViewThrowRig';
+    rig.frustumCulled = false;
+
+    const item = new THREE.Group();
+    item.name = 'ViewThrowItem';
+    item.frustumCulled = false;
+
+    const grenade = new THREE.Group();
+    grenade.name = 'ViewThrowGrenade';
+    const body = b(0.17, 0.22, 0.17, 0x4a5a3a, 0, 0, 0);
+    body.name = 'ViewThrowBody';
+    body.material = new THREE.MeshLambertMaterial({
+      color: 0x4a5a3a,
+      emissive: 0x1a2014,
+      emissiveIntensity: 0.22,
+    });
+    grenade.add(body);
+    grenade.add(b(0.12, 0.05, 0.12, 0x2a2a2a, 0, 0.12, 0));
+    grenade.add(b(0.045, 0.09, 0.045, 0x3a3a3a, 0.08, 0.1, 0.02));
+    grenade.add(b(0.035, 0.12, 0.025, 0xc8c070, 0.1, 0.02, 0.04));
+    item.add(grenade);
+
+    const bottle = new THREE.Group();
+    bottle.name = 'ViewThrowBottle';
+    bottle.visible = false;
+    bottle.add(b(0.1, 0.26, 0.1, 0xcc6622, 0, -0.02, 0));
+    bottle.add(b(0.06, 0.1, 0.06, 0x8a4420, 0, 0.14, 0));
+    bottle.add(b(0.08, 0.04, 0.08, 0xe8d8a8, 0, 0.2, 0));
+    item.add(bottle);
+
+    const can = new THREE.Group();
+    can.name = 'ViewThrowCan';
+    can.visible = false;
+    can.add(b(0.12, 0.2, 0.12, 0xe8e0c8, 0, 0, 0));
+    can.add(b(0.1, 0.04, 0.1, 0x888888, 0, 0.11, 0));
+    item.add(can);
+
+    function uniquifyMats(obj) {
+      obj.traverse(function (m) {
+        if (m.material) m.material = m.material.clone();
+      });
+    }
+    uniquifyMats(bottle);
+    uniquifyMats(can);
+
+    const rHand = new THREE.Group();
+    rHand.frustumCulled = false;
+    rHand.add(b(0.16, 0.12, 0.15, skin, 0.03, -0.02, 0.02));
+    rHand.add(b(0.14, 0.1, 0.13, skinDark, 0.03, -0.04, 0.04));
+    rHand.add(b(0.045, 0.11, 0.05, skin, -0.04, -0.11, 0.02));
+    rHand.add(b(0.045, 0.12, 0.05, skin, 0.01, -0.12, 0.02));
+    rHand.add(b(0.045, 0.12, 0.05, skin, 0.06, -0.12, 0.02));
+    rHand.add(b(0.045, 0.1, 0.05, skin, 0.11, -0.1, 0.02));
+    rHand.add(b(0.055, 0.05, 0.09, skin, 0.12, 0.04, -0.04));
+    item.position.set(0.04, 0.02, -0.14);
+    rHand.add(item);
+    rHand.position.set(0.06, -0.1, -0.1);
+    rHand.rotation.set(0.18, 0.22, 0.12);
+
+    const rArm = new THREE.Group();
+    rArm.frustumCulled = false;
+    addCheckeredSleeve(rArm, 0, 0.1, 0, 0.24, 'y');
+    rArm.add(b(0.17, 0.07, 0.17, sleeveA, 0, 0.22, 0));
+    rArm.add(b(0.15, 0.2, 0.15, skin, 0.01, -0.08, 0.03));
+    rArm.add(b(0.14, 0.1, 0.14, skinDark, 0.01, -0.22, 0.04));
+    rArm.position.set(0.1, -0.08, 0.08);
+    rArm.rotation.set(0.48, 0.08, -0.32);
+    rArm.add(rHand);
+
+    const lHand = new THREE.Group();
+    lHand.frustumCulled = false;
+    lHand.add(b(0.13, 0.1, 0.13, skin, 0, 0, 0));
+    lHand.add(b(0.12, 0.08, 0.11, skinDark, 0, -0.02, 0.02));
+    lHand.add(b(0.038, 0.09, 0.042, skin, -0.055, -0.09, 0));
+    lHand.add(b(0.038, 0.1, 0.042, skin, -0.015, -0.1, 0));
+    lHand.add(b(0.038, 0.09, 0.042, skin, 0.025, -0.09, 0));
+    lHand.add(b(0.045, 0.045, 0.07, skin, -0.08, 0.03, 0.03));
+    lHand.position.set(-0.08, -0.04, -0.18);
+    lHand.rotation.set(0.32, -0.18, 0.38);
+
+    const lArm = new THREE.Group();
+    lArm.frustumCulled = false;
+    addCheckeredSleeve(lArm, 0, 0.06, 0, 0.2, 'y');
+    lArm.add(b(0.15, 0.06, 0.15, sleeveB, 0, 0.16, 0));
+    lArm.add(b(0.13, 0.16, 0.13, skin, -0.01, -0.1, 0.04));
+    lArm.add(b(0.12, 0.09, 0.12, skinDark, -0.01, -0.22, 0.05));
+    lArm.position.set(-0.12, -0.14, 0.02);
+    lArm.rotation.set(0.78, 0.22, 0.38);
+    lArm.add(lHand);
+
+    rig.add(rArm);
+    rig.add(lArm);
+    root.add(rig);
+    root.userData.rig = rig;
+    root.userData.arm = rig;
+    root.userData.rArm = rArm;
+    root.userData.lArm = lArm;
+    root.userData.item = item;
+    root.userData.body = body;
+    root.userData.parts = { grenade: grenade, bottle: bottle, can: can };
+    root.userData.hip = { x: 0.2, y: -0.22, z: -0.44, rx: 0, ry: 0, rz: 0 };
+    root.userData.rArmRest = {
+      x: rArm.position.x,
+      y: rArm.position.y,
+      z: rArm.position.z,
+      rx: rArm.rotation.x,
+      ry: rArm.rotation.y,
+      rz: rArm.rotation.z,
+    };
+    root.userData.lArmRest = {
+      x: lArm.position.x,
+      y: lArm.position.y,
+      z: lArm.position.z,
+      rx: lArm.rotation.x,
+      ry: lArm.rotation.y,
+      rz: lArm.rotation.z,
+    };
+    root.userData.rest = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
+    return root;
+  }
+
   /**
    * FPS held gray stone cube (hotbar 4 / 5 build mode).
    * Shades of gray voxels form one solid block; replaces the rifle viewmodel.
@@ -1258,6 +1518,8 @@
     createClassSoldier,
     createPreviewSoldier,
     createViewModel,
+    createKnifeViewModel,
+    createThrowableViewModel,
     createBuildViewModel,
     setCrouchPose,
     updateCrouchPose,

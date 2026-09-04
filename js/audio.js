@@ -425,6 +425,21 @@
       A.tone(80, 0.06, 'triangle', 0.1);
       A.noiseBurst(0.04, 0.12, 80, 900);
     },
+    melee_swing(A) {
+      A.noiseBurst(0.07, 0.16, 1800, 9000);
+      A.tone(420, 0.05, 'triangle', 0.08);
+    },
+    melee_hit(A) {
+      A.noiseBurst(0.06, 0.28, 400, 5000);
+      A.tone(220, 0.07, 'sawtooth', 0.16);
+      A.tone(90, 0.09, 'triangle', 0.14);
+    },
+    melee_backstab(A) {
+      A.noiseBurst(0.09, 0.32, 300, 6500);
+      A.tone(180, 0.1, 'sawtooth', 0.2);
+      A.tone(720, 0.06, 'triangle', 0.14);
+      A.tone(1100, 0.05, 'square', 0.1);
+    },
     break_block(A) {
       A.noiseBurst(0.1, 0.26, 100, 2200);
       A.tone(70, 0.08, 'triangle', 0.12);

@@ -871,6 +871,7 @@
     const BLOCK = global.VF.BLOCK;
     const t = this.world.get(x, y, z);
     if (t === BLOCK.AIR || t === BLOCK.WATER || t === BLOCK.BEDROCK) return false;
+    if (this.world._isStructureSolid && !this.world._isStructureSolid(x, y, z)) return false;
     if (t === BLOCK.METAL) {
       this.world.set(x, y, z, BLOCK.AIR);
       const cs = this.world.chunkSize || 16;
@@ -2007,6 +2008,18 @@
     if (global.VF.Audio) global.VF.Audio.play('explosion');
     this._spawnBlastFx(x, y, z);
     this._breakVoxels(x, y, z);
+    if (this.world && this.world.deformTerrainCircle) {
+      const craterR = VANGUARD.radiusOuter;
+      const craterD = 0.85;
+      const changed = this.world.deformTerrainCircle(x, z, craterR, craterD, {
+        maxDepth: 1.2,
+        maxNeighborDelta: 0.8,
+      });
+      const weapons = global.VF.game && global.VF.game.weapons;
+      if (changed && weapons && weapons._syncTerrainDeform) {
+        weapons._syncTerrainDeform(x, z, craterR, craterD);
+      }
+    }
     this._damageHostiles(x, y, z);
 
     if (this.player && this.player.classId === VANGUARD.id) {

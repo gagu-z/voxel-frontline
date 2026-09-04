@@ -28,6 +28,7 @@
       tags: ['队伍人数 25', '玩家上限 2', '大地图'],
       desc: '摧毁敌方核心。双方核心各 1000 点结构值，率先拆毁对方核心的队伍获胜。',
       accent: '#e8a050',
+      art: 'assets/mode-core.png',
       params: {
         teamSize: 25,
         cores: true,
@@ -175,6 +176,7 @@
       tags: ['玩家数 8', '无队伍', '个人排名'],
       desc: '所有人打所有人，没有队友。率先达到 30 杀，或时限内击杀最多者获胜。',
       accent: '#5ad2a0',
+      art: 'assets/mode-ffa.png',
       params: {
         // 基础规则（文档第十部分）
         combatants: 8,
@@ -230,13 +232,85 @@
       },
     },
     {
-      id: 'reserved-2',
-      name: '待定模式',
-      sub: '未解锁',
+      id: 'gungame',
+      name: '枪械模式',
+      sub: '多人对战',
       kicker: 'VOXEL FRONTLINE',
-      tags: ['—'],
-      desc: '模式尚未确定，位置已预留。',
-      locked: true,
+      tags: ['玩家数 8', '无队伍', '武器进阶'],
+      desc: '所有人从同一把武器开始，每击杀 1 人升一级武器。最先用最后一把武器完成击杀者获胜。',
+      accent: '#8f7bd8',
+      art: 'assets/mode-gun.png',
+      params: {
+        // 基础规则（文档 2.1 / 八）
+        combatants: 8,
+        teamSize: 8,
+        // 无硬时限，1200s 兜底：时限到则等级最高者胜
+        timeLimit: 1200,
+
+        // 模式差异开关
+        gungame: true,
+        cores: false,
+        spawnCapture: false,
+        building: false,
+        randomMap: true,
+        instantRespawn: true,
+        friendlyFire: false,
+        reward: 'tdm',
+
+        /**
+         * 武器序列（文档 2.3）——等级 = 数组下标，最后一项即最终级。
+         * 目前项目只有 AKM(ar) / 870(sg) / SVD(sr) 三把枪，所以先在这三把里
+         * 轮动凑出 9 级；新增枪种后只改这一个数组即可加长阶梯。
+         */
+        weaponSequence: ['ar', 'sg', 'sr', 'ar', 'sg', 'sr', 'ar', 'sg', 'sr'],
+        ammoRefillOnSwitch: true,
+        ammoRefillOnKill: true,
+        // 方案A（文档 9.1 严格）：只有用当前等级武器直接击杀才升级
+        strictWeaponCredit: true,
+
+        /**
+         * 降级（文档 3.1）——项目没有近战武器，所以「刀杀降级」落地为
+         * 「被爆头击杀降级」：爆头同样要求贴近/精准，保留了压制领先者的作用。
+         */
+        demoteEnable: true,
+        demoteLevels: 1,
+        demoteFloor: 0,
+        finalLevelProtection: false,
+        suicideDemote: false,
+
+        // 复活（文档 八）
+        respawnDelay: 2.5,
+        spawnProtection: 1.5,
+        spawnSafeRadius: 15,
+        deathPenaltyTime: 5.0,
+        spawnPickTop: 3,
+        spawnCampWindow: 5.0,
+        spawnCampDeaths: 2,
+        spawnBlockedProtection: 3.0,
+
+        // 局时结构（复用死斗 / 自由混战）
+        prepTime: 10,
+        resultTime: 15,
+        matchEndHold: 20,
+
+        // 系统（文档 4.3 / 八）：连杀奖励关闭，聚焦武器进阶本身
+        killstreak: false,
+        weaponCustomization: false,
+
+        // 进度可视化（文档 五）
+        showLiveRank: true,
+        leaderMarker: true,
+
+        // AI（文档 6 / 八）
+        aiWeaponAdapt: true,
+        aiFleeThreshold: 0.25,
+        aiTeamCoord: false,
+        /** AI 命中玩家时的爆头概率——没有它，降级只能玩家单向触发。 */
+        aiHeadshotChance: 0.18,
+
+        // 随机地图：复用自由混战的随机图
+        mapHeightCap: 26,
+      },
     },
   ];
 
@@ -315,6 +389,21 @@
   /** 自由混战（Free-For-All）— teamless individual deathmatch. */
   function isFfa() {
     return currentId() === 'ffa';
+  }
+
+  /** 枪械模式（Gun Game）— teamless, win by finishing the weapon ladder. */
+  function isGg() {
+    return currentId() === 'gungame';
+  }
+
+  /**
+   * No teams at all: 自由混战 and 枪械模式 both put the player alone against
+   * everyone. Callers that only care about "is this a teamless arena" (AI
+   * rostering, spawn plumbing, start-spawn assignment) use this instead of
+   * testing each mode id.
+   */
+  function isTeamless() {
+    return isFfa() || isGg();
   }
 
   /* ───────────────────────── 模式选择界面 ───────────────────────── */
@@ -517,6 +606,8 @@
     isTdm: isTdm,
     isSd: isSd,
     isFfa: isFfa,
+    isGg: isGg,
+    isTeamless: isTeamless,
     restore: function () {
       return setMode(readStored());
     },

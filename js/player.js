@@ -20,6 +20,8 @@
   const ADS_FOV = 48;
   const HIP_FOV = 70;
   const STEP_UP = 1.05; // walk up marked stair treads without jumping
+  const LOOK_WARP_PX2 = 480 * 480; // compositor / pointer-lock teleport
+  const LOOK_CLAMP_PX = 160; // cap a single event so a hitch cannot spin 90°
 
   function feelGroup(name) {
     const F = global.VF && global.VF.Feel;
@@ -139,6 +141,8 @@
     this.camera.add(this.viewModel);
     this._heldMode = 'weapon';
     if (wasBuild) this.setHeldMode('build');
+    const wpn = global.VF.game && global.VF.game.weapons;
+    if (wpn && wpn._restyleGun) wpn._restyleGun(wpn.current);
   };
 
   /** Switch FPS hands between rifle and gray stone block (slots 4/5) */
@@ -226,8 +230,10 @@
     this.unstuckFromWorld();
   };
 
-  /** Push feet out of solid voxels after spawn / bad landings. */
-  Player.prototype.unstuckFromWorld = function () {
+  /** Push feet out of solid voxels after spawn / bad landings.
+   *  maxR limits how far the search walks — keep it small during live
+   *  movement so a corner clip cannot teleport the camera across the lot. */
+  Player.prototype.unstuckFromWorld = function (maxR) {
     const pos = this.object.position;
     if (!this.world || !this._overlaps) return;
     if (!isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) {
@@ -238,7 +244,8 @@
     const ox = pos.x;
     const oy = pos.y;
     const oz = pos.z;
-    for (let r = 1; r <= 28; r++) {
+    const rMax = maxR != null ? maxR : 28;
+    for (let r = 1; r <= rMax; r++) {
       for (let a = 0; a < 16; a++) {
         const ang = (a / 16) * Math.PI * 2;
         const x = ox + Math.cos(ang) * r;
@@ -257,6 +264,12 @@
       }
     }
     pos.set(ox, oy, oz);
+    if (rMax < 8) {
+      // Live-move rescue failed nearby — don't lift 24m into the sky.
+      this.velocity.x = 0;
+      this.velocity.z = 0;
+      return;
+    }
     for (let i = 0; i < 48 && this._overlaps(); i++) pos.y += 0.5;
     this.velocity.set(0, 0, 0);
   };
@@ -299,6 +312,14 @@
 
     document.addEventListener('mousemove', (e) => {
       if (!self.locked) return;
+      if (self._lookIgnoreUntil && performance.now() < self._lookIgnoreUntil) return;
+      const mx0 = e.movementX || 0;
+      const my0 = e.movementY || 0;
+      // Pointer-lock (re)acquire, alt-tab and compositor hitches inject huge
+      // one-frame deltas that snap the camera. Drop true warps, clamp the rest.
+      if (mx0 * mx0 + my0 * my0 > LOOK_WARP_PX2) return;
+      const mx = mx0 > LOOK_CLAMP_PX ? LOOK_CLAMP_PX : mx0 < -LOOK_CLAMP_PX ? -LOOK_CLAMP_PX : mx0;
+      const my = my0 > LOOK_CLAMP_PX ? LOOK_CLAMP_PX : my0 < -LOOK_CLAMP_PX ? -LOOK_CLAMP_PX : my0;
       let sens = feelGroup('camera').mouseSens != null ? feelGroup('camera').mouseSens : MOUSE_SENS;
       if (self.aiming) {
         sens =
@@ -310,16 +331,22 @@
           sens = base * def.adsSens;
         }
       }
-      self.yaw -= e.movementX * sens;
-      self.pitch -= e.movementY * sens;
+      if (global.VF.Throwables && global.VF.Throwables.lookMul) {
+        sens *= global.VF.Throwables.lookMul();
+      }
+      self.yaw -= mx * sens;
+      self.pitch -= my * sens;
       self.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, self.pitch));
     });
 
     document.addEventListener('mousedown', (e) => {
       if (!self.locked) return;
       if (e.button === 2) {
-        self.keys['Mouse2'] = true;
-        self.aiming = true;
+        const wdef = self._weaponDef && self._weaponDef();
+        if (!(wdef && wdef.melee)) {
+          self.keys['Mouse2'] = true;
+          self.aiming = true;
+        }
       }
     });
     document.addEventListener('mouseup', (e) => {
@@ -334,6 +361,7 @@
   Player.prototype.setPointerLock = function (locked) {
     this.locked = locked;
     if (!locked) this.aiming = false;
+    else this._lookIgnoreUntil = performance.now() + 80;
   };
 
   Player.prototype.getEyeHeight = function () {
@@ -560,13 +588,23 @@
   /** Apply damage (armor absorbs ~55%). Returns true if still alive.
    * @param {number} amount
    * @param {THREE.Vector3|{x,y,z}|null} [fromPos] attacker position (for frontal shield)
+   * @param {object|string|null} [attacker]
+   * @param {{headshot?:boolean, weaponId?:string}} [opts] 枪械模式需要知道这一枪是不是
+   *   爆头（决定降级）以及用的哪把武器（决定击杀方能否升级）。
    */
-  Player.prototype.takeDamage = function (amount, fromPos, attacker) {
+  Player.prototype.takeDamage = function (amount, fromPos, attacker, opts) {
     if (this.dead || !this.alive) return false;
+    // die() 在本函数末尾才被调用，先把这一枪的性质记下来交给结算。
+    this._lastHitInfo = opts || null;
     // 死斗 spawn protection: drops the moment the player fires (see weapons.js).
     // The prep phase is covered too, so nobody can be killed before the start.
     const tdmGate = global.VF.TdmMatch;
-    if (this.spawnProtect > 0 || (tdmGate && tdmGate.active && !tdmGate.ended && !tdmGate.scoringLive())) {
+    const ggGate = global.VF.GgMatch;
+    if (
+      this.spawnProtect > 0 ||
+      (tdmGate && tdmGate.active && !tdmGate.ended && !tdmGate.scoringLive()) ||
+      (ggGate && ggGate.active && !ggGate.ended && !ggGate.scoringLive())
+    ) {
       if (global.VF.UI) global.VF.UI.updateVitals(this.health, this.armor);
       return true;
     }
@@ -592,7 +630,7 @@
     }
 
     const felt = dmg;
-    if (this.armor > 0 && dmg > 0) {
+    if (!(opts && opts.ignoreArmor) && this.armor > 0 && dmg > 0) {
       const absorb = Math.min(this.armor, dmg * 0.55);
       this.armor -= absorb;
       dmg -= absorb;
@@ -681,10 +719,30 @@
     this.spawnProtect = 0;
 
     const tdm = global.VF.TdmMatch;
+    const ffa = global.VF.FfaMatch;
+    const gg = global.VF.GgMatch;
+    const hit = this._lastHitInfo || null;
+    this._lastHitInfo = null;
     if (tdm && tdm.scoringLive()) {
       tdm.registerKill({
         victim: this,
         killer: attacker || null,
+        maxHp: this.maxHealth || 100,
+      });
+    }
+    if (ffa && ffa.scoringLive()) {
+      ffa.registerKill({
+        victim: this,
+        killer: attacker || null,
+        maxHp: this.maxHealth || 100,
+      });
+    }
+    if (gg && gg.scoringLive()) {
+      gg.registerKill({
+        victim: this,
+        killer: attacker || null,
+        headshot: !!(hit && hit.headshot),
+        weaponId: (hit && hit.weaponId) || null,
         maxHp: this.maxHealth || 100,
       });
     }
@@ -698,6 +756,10 @@
     if (global.VF.TdmSpawn && tdm && tdm.isRunning()) {
       global.VF.TdmSpawn.onPlayerDeath();
     }
+    // 枪械模式复用 自由混战 的复活选点
+    if (global.VF.FfaSpawn && ((ffa && ffa.isRunning()) || (gg && gg.isRunning()))) {
+      global.VF.FfaSpawn.onPlayerDeath();
+    }
     this.velocity.set(0, 0, 0);
     this.zipRide = null;
     this.aiming = false;
@@ -709,6 +771,9 @@
     }
     if (global.VF.game && global.VF.game.weapons && global.VF.game.weapons._cancelReload) {
       global.VF.game.weapons._cancelReload();
+    }
+    if (global.VF.Throwables && global.VF.Throwables.onPlayerDeath) {
+      global.VF.Throwables.onPlayerDeath();
     }
     if (global.VF.Audio) {
       global.VF.Audio.play('death');
@@ -725,12 +790,33 @@
       global.VF.Pvp.reportLocalDeath(attacker);
     }
 
-    if (global.VF.UI && global.VF.UI.showDeath) {
+    // 枪械模式: 这一刀可能同时是对手的通关击杀，那样 GgUi 已经弹出结算面板了，
+    // 别再往上盖一层阵亡界面。
+    const ggFinished = !!(gg && gg.active && gg.ended);
+    if (global.VF.UI && global.VF.UI.showDeath && !ggFinished) {
       const sd = global.VF.SdMatch;
       if (tdm && tdm.isRunning()) {
         global.VF.UI.showDeath('你已阵亡', '系统正在挑选安全出生区', '稍后自动重新投放', {
           autoRespawn: true,
         });
+      } else if (ffa && ffa.isRunning()) {
+        // Name the killer to feed the design's 个人恩怨 / 复仇 loop.
+        const foe = attacker && attacker.name ? attacker.name : null;
+        global.VF.UI.showDeath(
+          '你已阵亡',
+          foe ? '被 ' + foe + ' 击杀' : '混战阵亡',
+          '系统正在挑选最空旷的角落',
+          { autoRespawn: true }
+        );
+      } else if (gg && gg.isRunning()) {
+        const me = gg.playerStats();
+        const foe = attacker && attacker.name ? attacker.name : null;
+        global.VF.UI.showDeath(
+          '你已阵亡',
+          foe ? '被 ' + foe + ' 击杀' : '混战阵亡',
+          me ? '当前 Lv' + me.level + ' · ' + gg.labelAt(me.level) : '系统正在挑选出生点',
+          { autoRespawn: true }
+        );
       } else if (sd && sd.isRunning()) {
         // 爆破 单命制: no mid-round redeploy — spectate until the next round.
         global.VF.UI.showDeath('你已阵亡', '本回合单命制 · 观战至下回合', '下回合开始时自动重新投放', {
@@ -853,6 +939,19 @@
     if (this.skillSpeedBuffTimer > 0) {
       speedMul *= this.skillSpeedBuffMul || 1.2;
     }
+    if (global.VF.Throwables && global.VF.Throwables.moveMul) {
+      speedMul *= global.VF.Throwables.moveMul();
+    }
+    const heldDef = this._weaponDef && this._weaponDef();
+    if (heldDef && heldDef.melee && !this.aiming) {
+      speedMul *= sprint
+        ? heldDef.sprintSpeedMul != null
+          ? heldDef.sprintSpeedMul
+          : 1.18
+        : heldDef.moveSpeedMul != null
+          ? heldDef.moveSpeedMul
+          : 1.12;
+    }
     const dashing = global.VF.game && global.VF.game.skills && global.VF.game.skills.dash;
     if (dashing) {
       this.velocity.x = 0;
@@ -884,7 +983,7 @@
     if (this._overlaps && this._overlaps() && this.direction.lengthSq() > 0) {
       this._stuckMoveT = (this._stuckMoveT || 0) + dt;
       if (this._stuckMoveT > 0.2) {
-        this.unstuckFromWorld();
+        this.unstuckFromWorld(4);
         this._stuckMoveT = 0;
       }
     } else {
@@ -900,6 +999,10 @@
     let sx = 0;
     let sy = 0;
     let sz = 0;
+    if (global.VF.Throwables && global.VF.Throwables.stunShake) {
+      const stunSh = global.VF.Throwables.stunShake();
+      if (stunSh > 0) this._shake = Math.max(this._shake || 0, stunSh);
+    }
     if (this._shake > 0.0005) {
       const sh = feelGroup('shake');
       const ay = sh.axisY != null ? sh.axisY : 0.7;
@@ -917,7 +1020,14 @@
     // ADS / held-item base pose (no ADS while reloading)
     const weapons = global.VF.game && global.VF.game.weapons;
     const reloadW = weapons && weapons.getReloadAnim ? weapons.getReloadAnim() : 0;
-    const adsTarget = this.aiming && this._heldMode !== 'build' && reloadW < 0.05 ? 1 : 0;
+    const held = this._weaponDef && this._weaponDef();
+    const throwBusy = global.VF.Throwables && global.VF.Throwables.busy && global.VF.Throwables.busy();
+    if (held && held.melee) this.aiming = false;
+    if (throwBusy) this.aiming = false;
+    const adsTarget =
+      this.aiming && this._heldMode !== 'build' && reloadW < 0.05 && !(held && held.melee) && !throwBusy
+        ? 1
+        : 0;
     this._adsBlend += (adsTarget - this._adsBlend) * Math.min(1, dt * 12);
 
     // Run sway: gun follows footsteps (side + vertical + light roll)
@@ -1026,8 +1136,10 @@
       this.camera.fov = targetFov;
     }
 
-    // Hide held gun when looking through optic / sniper scope
-    if (this.viewModel && this._heldMode !== 'build') {
+    // Hide held gun when throwing, or when looking through optic / sniper scope
+    if (throwBusy) {
+      if (this.viewModel) this.viewModel.visible = false;
+    } else if (this.viewModel && this._heldMode !== 'build') {
       const scope = def && def.scope;
       const hideGun = this._adsBlend > 0.55 && (scope === 'sniper' || scope === 'optic');
       this.viewModel.visible = !hideGun;
@@ -1378,27 +1490,105 @@
   Player.prototype._resolveAxis = function (axis) {
     const pos = this.object.position;
     const hits = this.world.collideAABB(this._bodyBox());
-    for (let i = 0; i < hits.length; i++) {
-      const b = hits[i];
-      if (axis === 'x') {
-        if (this.velocity.x > 0) pos.x = b.min.x - PLAYER_RADIUS - 0.001;
-        else if (this.velocity.x < 0) pos.x = b.max.x + PLAYER_RADIUS + 0.001;
-        this.velocity.x = 0;
-      } else if (axis === 'z') {
-        if (this.velocity.z > 0) pos.z = b.min.z - PLAYER_RADIUS - 0.001;
-        else if (this.velocity.z < 0) pos.z = b.max.z + PLAYER_RADIUS + 0.001;
-        this.velocity.z = 0;
-      } else if (axis === 'y') {
-        if (this.velocity.y > 0) {
-          pos.y = b.min.y - PLAYER_HEIGHT - 0.001;
-          this.velocity.y = 0;
-        } else if (this.velocity.y < 0) {
-          pos.y = b.max.y + 0.001;
+    if (!hits.length) return;
+
+    const radius = PLAYER_RADIUS;
+    const height = this.getBodyHeight();
+    const vel = this.velocity[axis];
+
+    if (axis === 'y') {
+      if (vel > 0) {
+        let best = Infinity;
+        const head = pos.y + height;
+        for (let i = 0; i < hits.length; i++) {
+          const b = hits[i];
+          if (!this._hitOverFeet(b, pos, 0.08)) continue;
+          if (b.min.y < pos.y + height * 0.45) continue;
+          if (b.min.y > head + 0.08) continue;
+          const ny = b.min.y - height - 0.001;
+          const push = pos.y - ny;
+          if (push >= 0 && push < best && push <= 1.2) {
+            best = push;
+            pos.y = ny;
+          }
+        }
+        if (best !== Infinity) this.velocity.y = 0;
+      } else if (vel < 0) {
+        const fallSlop = Math.max(STEP_UP + 0.12, Math.abs(vel) * 0.08 + 0.25);
+        let bestY = -Infinity;
+        for (let i = 0; i < hits.length; i++) {
+          const b = hits[i];
+          // Side walls extend far above the feet — they are not floors.
+          // Only land on a box the player is actually standing over.
+          if (!this._hitOverFeet(b, pos, 0.08)) continue;
+          if (b.max.y > pos.y + fallSlop) continue;
+          if (b.max.y < pos.y - 0.4) continue;
+          if (b.max.y > bestY) bestY = b.max.y;
+        }
+        if (bestY > -Infinity) {
+          pos.y = bestY + 0.001;
           this.velocity.y = 0;
           this.onGround = true;
         }
       }
+      return;
     }
+
+    const loOf = (b) => (axis === 'x' ? b.min.x : b.min.z);
+    const hiOf = (b) => (axis === 'x' ? b.max.x : b.max.z);
+    const maxPush = Math.max(0.55, Math.abs(vel) * 0.08 + 0.2);
+    let bestPush = Infinity;
+    let bestPos = pos[axis];
+
+    for (let i = 0; i < hits.length; i++) {
+      const b = hits[i];
+      const lo = loOf(b);
+      const hi = hiOf(b);
+      if (vel > 0) {
+        const next = lo - radius - 0.001;
+        const push = pos[axis] - next;
+        if (push >= 0 && push < bestPush && push <= maxPush) {
+          bestPush = push;
+          bestPos = next;
+        }
+      } else if (vel < 0) {
+        const next = hi + radius + 0.001;
+        const push = next - pos[axis];
+        if (push >= 0 && push < bestPush && push <= maxPush) {
+          bestPush = push;
+          bestPos = next;
+        }
+      } else {
+        const left = lo - radius - 0.001;
+        const right = hi + radius + 0.001;
+        const pL = pos[axis] - left;
+        const pR = right - pos[axis];
+        if (pL >= 0 && pL < bestPush && pL <= maxPush) {
+          bestPush = pL;
+          bestPos = left;
+        }
+        if (pR >= 0 && pR < bestPush && pR <= maxPush) {
+          bestPush = pR;
+          bestPos = right;
+        }
+      }
+    }
+
+    if (bestPush !== Infinity) {
+      pos[axis] = bestPos;
+      if (vel !== 0) this.velocity[axis] = 0;
+    }
+  };
+
+  /** True if the player's XZ center sits over (or nearly over) the hit box. */
+  Player.prototype._hitOverFeet = function (b, pos, pad) {
+    pad = pad != null ? pad : 0.08;
+    return (
+      pos.x >= b.min.x - pad &&
+      pos.x <= b.max.x + pad &&
+      pos.z >= b.min.z - pad &&
+      pos.z <= b.max.z + pad
+    );
   };
 
   global.VF = global.VF || {};

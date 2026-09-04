@@ -1486,7 +1486,7 @@
       if (!data || !data.kind) return;
       if (data.fromId && data.fromId === this._busClientId) return;
       // Voxel / door destruction piggybacks on the build bus
-      if (data.kind === 'break-voxel' || data.kind === 'break-door') {
+      if (data.kind === 'break-voxel' || data.kind === 'break-door' || data.kind === 'deform-terrain') {
         this._applyRemoteBreak(data);
         return;
       }
@@ -1519,7 +1519,12 @@
         return;
       }
       try {
-        if (data.kind === 'break-door' && world.destroyDoorNear) {
+        if (data.kind === 'deform-terrain' && world.deformTerrainCircle) {
+          world.deformTerrainCircle(data.x, data.z, data.radius, data.depth, {
+            maxDepth: 1.2,
+            maxNeighborDelta: 0.8,
+          });
+        } else if (data.kind === 'break-door' && world.destroyDoorNear) {
           world.destroyDoorNear(data.x, data.y, data.z);
         } else if (world.breakBlock) {
           world.breakBlock(data.x, data.y, data.z);
@@ -1539,12 +1544,19 @@
       if (!payload || !this.roomCode) return;
       if (this.phase !== 'play' && this.phase !== 'spawnWait') return;
 
+      const deform = payload.kind === 'deform-terrain';
       const evt = {
         type: 'break',
-        kind: payload.kind === 'break-door' ? 'break-door' : 'break-voxel',
-        x: payload.x | 0,
-        y: payload.y | 0,
-        z: payload.z | 0,
+        kind: deform
+          ? 'deform-terrain'
+          : payload.kind === 'break-door'
+            ? 'break-door'
+            : 'break-voxel',
+        x: deform ? +payload.x : payload.x | 0,
+        y: deform ? 0 : payload.y | 0,
+        z: deform ? +payload.z : payload.z | 0,
+        radius: deform ? +payload.radius : undefined,
+        depth: deform ? +payload.depth : undefined,
         t: Date.now(),
         fromId: this._busClientId,
         id:
@@ -1736,15 +1748,41 @@
     /** Attribute the remote player's death per reportLocalDeath()'s killerKind
      * instead of assuming the local human always did it (see there for why). */
     _registerRemoteDeath(data) {
-      const tdm = global.VF.TdmMatch;
-      if (!tdm || !tdm.scoringLive()) return;
-      if (data.killerKind === 'remote') {
-        tdm.registerKill({ victim: 'remote', killer: 'player', maxHp: 100 });
-      } else if (data.killerKind === 'ai') {
-        tdm.registerKill({ victim: 'remote', killer: botKillActor(data.killerTeam), maxHp: 100 });
-      } else {
-        tdm.registerKill({ victim: 'remote', killer: null, maxHp: 100 });
+      const GM = global.VF.GameModes;
+      const teamless = !!(GM && GM.isTeamless && GM.isTeamless());
+      const scorer =
+        GM && GM.isGg && GM.isGg()
+          ? global.VF.GgMatch
+          : GM && GM.isFfa && GM.isFfa()
+            ? global.VF.FfaMatch
+            : GM && GM.isTdm && GM.isTdm()
+              ? global.VF.TdmMatch
+              : null;
+      if (scorer && scorer.scoringLive && scorer.scoringLive()) {
+        // 自由混战 / 枪械模式: only human-vs-human kills are shared. An AI death
+        // on the other client would otherwise mint a fake "友军部队" board row.
+        if (!teamless || data.killerKind === 'remote') {
+          this._creditRemoteDeath(scorer, data);
+        }
       }
+      if (global.VF.SdStats && global.VF.SdStats.live && global.VF.SdStats.live()) {
+        this._creditRemoteDeath(global.VF.SdStats, data);
+      }
+    },
+
+    _creditRemoteDeath(scorer, data) {
+      if (!scorer || !scorer.registerKill) return;
+      const opts = { victim: 'remote', maxHp: 100 };
+      if (data.killerKind === 'remote') {
+        opts.killer = 'player';
+        const w = global.VF.game && global.VF.game.weapons;
+        if (w && w.current) opts.weaponId = w.current;
+      } else if (data.killerKind === 'ai') {
+        opts.killer = botKillActor(data.killerTeam);
+      } else {
+        opts.killer = null;
+      }
+      scorer.registerKill(opts);
     },
 
     declareWinner(winnerTeam, reason) {
@@ -1903,6 +1941,13 @@
       if (proj < 0 || proj > range) return null;
       const closest = origin.clone().addScaledVector(dir, proj);
       if (closest.distanceTo(center) > hitR) return null;
+      if (
+        global.VF.Throwables &&
+        global.VF.Throwables.occludesRay &&
+        global.VF.Throwables.occludesRay(origin, closest)
+      ) {
+        return null;
+      }
       return { point: closest, dist: proj };
     },
 

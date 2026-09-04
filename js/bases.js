@@ -399,6 +399,7 @@
     this.won = false;
     this.lost = false;
     this._setupSpawnPoints(allyPos, enemyPos);
+    if (w._finalizeTerrainHeight) w._finalizeTerrainHeight();
     if (w._rebuildAllChunks) w._rebuildAllChunks();
   };
 
@@ -416,7 +417,10 @@
           const zz = fz + dz;
           if (xx < 1 || zz < 1 || xx >= size - 1 || zz >= size - 1) continue;
           for (let y = gy + 1; y <= gy + 4; y++) w.set(xx, y, zz, global.VF.BLOCK.AIR);
-          if (w.groundY) w.groundY[zz * size + xx] = gy;
+          if (w.groundY) {
+            if (w._setColumnGround) w._setColumnGround(xx, zz, gy);
+            else w.groundY[zz * size + xx] = gy;
+          }
         }
       }
       return gy;
@@ -635,7 +639,10 @@
         for (let y = gy + 1; y < Math.min(gy + 24, w.height); y++) {
           w.set(x, y, z, BLOCK.AIR);
         }
-        if (w.groundY) w.groundY[z * w.worldSize + x] = gy;
+        if (w.groundY) {
+          if (w._setColumnGround) w._setColumnGround(x, z, gy);
+          else w.groundY[z * w.worldSize + x] = gy;
+        }
       }
     }
 

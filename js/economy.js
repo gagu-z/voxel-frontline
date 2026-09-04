@@ -240,7 +240,7 @@
   }
 
   function ownsWeapon(id) {
-    if (id === 'ar') return true;
+    if (id === 'ar' || id === 'knife') return true;
     const m = getMeta();
     return m.ownedWeapons.indexOf(id) >= 0;
   }

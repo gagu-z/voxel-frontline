@@ -218,6 +218,14 @@
     },
 
     updateAmmo(mag, reserve) {
+      const wrap = document.getElementById('ammo');
+      const melee = mag == null;
+      if (wrap) wrap.classList.toggle('melee', melee);
+      if (melee) {
+        if (this.els.ammoMag) this.els.ammoMag.textContent = '近战';
+        if (this.els.ammoReserve) this.els.ammoReserve.textContent = '';
+        return;
+      }
       this.els.ammoMag.textContent = mag;
       this.els.ammoReserve.textContent = reserve;
     },
@@ -587,9 +595,40 @@
       });
     },
 
+    /**
+     * 无建造模式（死斗 / 混战 / 爆破）：4 号位改为匕首，5 号位隐藏。
+     * 枪械模式不调用此方法，4/5 仍整栏隐藏。
+     */
+    setArenaKnifeSlot(on) {
+      const hotbar = document.getElementById('hotbar');
+      const slot4 = document.querySelector('#hotbar .slot[data-slot="4"]');
+      const slot5 = document.querySelector('#hotbar .slot[data-slot="5"]');
+      if (hotbar) hotbar.classList.toggle('arena-knife', !!on);
+      if (slot5) slot5.classList.toggle('hidden', !!on);
+      if (!slot4) return;
+      slot4.classList.remove('hidden');
+      slot4.classList.toggle('build', !on);
+      slot4.classList.toggle('melee', !!on);
+      const icon = slot4.querySelector('.slot-icon');
+      const name = slot4.querySelector('.slot-name');
+      if (on) {
+        slot4.title = '战术匕首 (4)';
+        if (icon) icon.className = 'slot-icon weapon-knife';
+        if (name) name.textContent = '匕首';
+      } else {
+        slot4.title = 'Cover / 掩体 (4)';
+        if (icon) icon.className = 'slot-icon cover-icon';
+        if (name) name.textContent = '掩体';
+      }
+    },
+
     syncWeaponLocks() {
       if (!this.els.hotbarSlots) return;
+      // 枪械模式的枪是按进度发的，不是商城买的——别把序列里的枪显示成未解锁
+      const GM = global.VF.GameModes;
+      const gg = !!(GM && GM.isGg && GM.isGg());
       const owns = function (id) {
+        if (gg) return true;
         if (!global.VF.Economy || !global.VF.Economy.ownsWeapon) return true;
         return global.VF.Economy.ownsWeapon(id);
       };

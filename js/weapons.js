@@ -1,6 +1,7 @@
 /**
  * weapons.js — Weapon definitions, shooting, recoil, muzzle flash, impacts
  * Hotbar slots 1–3: AKM, Remington 870, SVD (ids ar/sg/sr kept for save compat)
+ * Slot 4: combat knife in modes with building off (see melee.js)
  */
 (function (global) {
   'use strict';
@@ -135,6 +136,39 @@
       scope: 'sniper',
       adsSens: 0.45,
     },
+    knife: {
+      id: 'knife',
+      model: 'Combat Knife',
+      name: 'Knife',
+      nameZh: '战术匕首',
+      slot: 4,
+      melee: true,
+      damage: 90,
+      backstabDamage: 999,
+      fireRate: 0.45,
+      magSize: 0,
+      reserve: 0,
+      spread: 0,
+      adsSpread: 0,
+      range: 2,
+      recoil: 0.04,
+      pellets: 0,
+      automatic: false,
+      reloadTime: 0,
+      ammoColor: 0xc8cdd4,
+      ammoLabel: '刀',
+      coreDamage: 0,
+      attackRange: 2.0,
+      attackAngle: Math.PI / 3,
+      windupTime: 0.05,
+      activeTime: 0.15,
+      recoveryTime: 0.25,
+      lungeRange: 2.6,
+      lungeTime: 0.2,
+      lungeCooldown: 0.3,
+      moveSpeedMul: 1.12,
+      sprintSpeedMul: 1.18,
+    },
   };
 
   function Weapons(player, world, scene) {
@@ -147,6 +181,7 @@
       ar: { mag: WEAPONS.ar.magSize, reserve: WEAPONS.ar.reserve },
       sg: { mag: WEAPONS.sg.magSize, reserve: WEAPONS.sg.reserve },
       sr: { mag: WEAPONS.sr.magSize, reserve: WEAPONS.sr.reserve },
+      knife: { mag: 1, reserve: 0 },
     };
     this.cooldown = 0;
     this.firing = false;
@@ -170,6 +205,7 @@
 
   /** Add reserve ammo for a weapon; capped at AMMO_RESERVE_MAX. Returns amount actually added. */
   Weapons.prototype.addReserve = function (weaponId, amount) {
+    if (weaponId === 'knife') return 0;
     if (!this.state[weaponId] || amount <= 0) return 0;
     const ammo = this.state[weaponId];
     const before = ammo.reserve;
@@ -224,12 +260,31 @@
       if (e.code === 'Digit1') self.equip('ar');
       if (e.code === 'Digit2') self.equip('sg');
       if (e.code === 'Digit3') self.equip('sr');
+      if (e.code === 'Digit4' && global.VF.Melee && global.VF.Melee.available()) {
+        self.equip('knife');
+      }
       if (e.code === 'KeyR') self.reload();
     });
   };
 
+  /** 枪械模式进行中：武器由进度强制分配，玩家不能自选（文档 4.1 去装备化）。 */
+  function ggLocksLoadout() {
+    const GM = global.VF.GameModes;
+    if (!(GM && GM.isGg && GM.isGg())) return false;
+    const gg = global.VF.GgMatch;
+    return !!(gg && gg.active);
+  }
+
   Weapons.prototype.equip = function (id) {
     if (!WEAPONS[id]) return;
+    if (global.VF.Throwables && global.VF.Throwables.busy && global.VF.Throwables.busy()) return;
+    if (id === 'knife' && !(global.VF.Melee && global.VF.Melee.available())) return;
+    if (ggLocksLoadout()) {
+      if (global.VF.UI && global.VF.UI.toast) {
+        global.VF.UI.toast('枪械模式 · 武器由进度决定');
+      }
+      return;
+    }
     const rangeOpen = global.VF.Range && global.VF.Range.isOpen;
     if (
       !rangeOpen &&
@@ -242,6 +297,19 @@
       }
       return;
     }
+    this._equipNow(id);
+  };
+
+  /**
+   * 枪械模式专用换枪：跳过商城解锁校验（武器是系统按进度发的，不是买的），
+   * 也跳过「手动切枪被锁」的拦截。GgMatch 每帧校准时调用。
+   */
+  Weapons.prototype.forceEquip = function (id) {
+    if (!WEAPONS[id] || this.current === id) return;
+    this._equipNow(id);
+  };
+
+  Weapons.prototype._equipNow = function (id) {
     if (this.reloading) this._cancelReload();
     this.current = id;
     this.mode = 'weapon';
@@ -257,6 +325,13 @@
 
   /** Ensure current gun is owned; fall back to AR. */
   Weapons.prototype.syncOwnedLoadout = function () {
+    // 枪械模式的武器不来自商城，别把进度枪换掉
+    if (ggLocksLoadout()) return;
+    if (this.current === 'knife' && !(global.VF.Melee && global.VF.Melee.available())) {
+      this.current = 'ar';
+      this._restyleGun('ar');
+      if (global.VF.UI) global.VF.UI.setHotbarSlot(WEAPONS.ar.slot);
+    }
     const owns =
       global.VF.Economy && global.VF.Economy.ownsWeapon
         ? function (id) {
@@ -275,11 +350,24 @@
 
   Weapons.prototype._restyleGun = function (id) {
     const gun = this.player.gunNode;
-    if (!gun) return;
-    // Scale cue per weapon type
-    if (id === 'sg') gun.scale.set(1.15, 1.1, 0.85);
-    else if (id === 'sr') gun.scale.set(0.95, 0.95, 1.35);
-    else gun.scale.set(1, 1, 1);
+    if (gun) {
+      if (id === 'sg') gun.scale.set(1.15, 1.1, 0.85);
+      else if (id === 'sr') gun.scale.set(0.95, 0.95, 1.35);
+      else gun.scale.set(1, 1, 1);
+    }
+    if (global.VF.Melee && global.VF.Melee.restyle) {
+      global.VF.Melee.restyle(this.player, id);
+    }
+    if (id !== 'knife' && global.VF.Melee && global.VF.Melee.cancel) {
+      global.VF.Melee.cancel(this);
+    }
+    if (global.VF.UI && global.VF.UI.updateAmmo) {
+      if (id === 'knife') global.VF.UI.updateAmmo(null, null);
+      else {
+        const ammo = this.getAmmo();
+        if (ammo) global.VF.UI.updateAmmo(ammo.mag, ammo.reserve);
+      }
+    }
   };
 
   Weapons.prototype.getDef = function () {
@@ -306,10 +394,15 @@
 
   Weapons.prototype.tryFire = function () {
     if (this.player && this.player.dead) return;
+    if (global.VF.Throwables && global.VF.Throwables.busy && global.VF.Throwables.busy()) return;
     if (this.mode !== 'weapon') return;
     if (this.reloading) return;
     if (this.cooldown > 0) return;
     const def = this.getDef();
+    if (def && def.melee) {
+      if (global.VF.Melee && global.VF.Melee.trySwing) global.VF.Melee.trySwing(this);
+      return;
+    }
     const ammo = this.getAmmo();
     if (ammo.mag <= 0) {
       if (ammo.reserve <= 0 && global.VF.Audio) global.VF.Audio.play('empty');
@@ -784,7 +877,7 @@
       }
     }
 
-    // Voxel DDA — find first solid closer than bestDist
+    // Voxel DDA — find first solid closer than bestDist (skip 1m terrain fill)
     let x = Math.floor(origin.x);
     let y = Math.floor(origin.y);
     let z = Math.floor(origin.z);
@@ -818,8 +911,10 @@
 
     let dist = 0;
     for (let i = 0; i < 400 && dist < bestDist; i++) {
+      const fill = this.world._isTerrainFill && this.world._isTerrainFill(x, y, z);
       const block = this.world.get(x, y, z);
       if (
+        !fill &&
         block !== global.VF.BLOCK.AIR &&
         block !== global.VF.BLOCK.WATER &&
         block !== global.VF.BLOCK.GLASS
@@ -849,6 +944,14 @@
           tMaxZ += tDeltaZ;
           z += stepZ;
         }
+      }
+    }
+
+    if (this.world.raycastTerrain) {
+      const thit = this.world.raycastTerrain(origin, dir, bestDist);
+      if (thit && thit.dist < bestDist) {
+        bestDist = thit.dist;
+        bestAction = { type: 'terrain', hit: thit, dist: thit.dist };
       }
     }
 
@@ -898,8 +1001,10 @@
       dmg = this._applyGhostDamageMods(dmg, bestAction.hit.enemy);
       const headshot = isHeadshot(bestAction.hit);
       if (headshot) dmg = Math.round(dmg * HEADSHOT_MUL);
+      // weaponId 让 枪械模式 判定「是否用当前等级武器完成的击杀」（文档 9.1 方案A）
       const result = global.VF.AI.damageEnemy(bestAction.hit.enemy, dmg, dir, {
         headshot: headshot,
+        weaponId: this.current,
       });
       this._shotHitHostile = true;
       this._shotHitCount++;
@@ -959,6 +1064,12 @@
         bestAction.hit.point.y,
         bestAction.hit.point.z
       );
+    } else if (bestAction.type === 'terrain') {
+      const point =
+        (bestAction.hit && bestAction.hit.point) ||
+        origin.clone().addScaledVector(dir, bestAction.dist || 0);
+      this._spawnImpact(point, 0x6a8a4a, 0.08);
+      if (global.VF.Audio) global.VF.Audio.play('impact');
     } else if (bestAction.type === 'voxel') {
       const point = origin.clone().addScaledVector(dir, bestAction.dist);
       this._spawnImpact(point, 0xffaa66, 0.1);
@@ -1055,6 +1166,19 @@
     global.VF.Pvp.sendWorldBreak({ kind: kind, x: x, y: y, z: z });
   };
 
+  Weapons.prototype._syncTerrainDeform = function (x, z, radius, depth) {
+    if (!global.VF.game || global.VF.game.mode !== 'pvp') return;
+    if (!global.VF.Pvp || !global.VF.Pvp.sendWorldBreak) return;
+    if (global.VF.Pvp.phase !== 'play') global.VF.Pvp.phase = 'play';
+    global.VF.Pvp.sendWorldBreak({
+      kind: 'deform-terrain',
+      x: x,
+      z: z,
+      radius: radius,
+      depth: depth,
+    });
+  };
+
   Weapons.prototype._spawnImpact = function (point, color, size) {
     const r = size != null ? size : 0.06;
     if (!this._impactGeo || this._impactGeoRadius !== 0.06) {
@@ -1132,13 +1256,17 @@
     return n;
   };
 
-  Weapons.prototype._spawnDebris = function (x, y, z, colorHex) {
+  Weapons.prototype._spawnDebris = function (x, y, z, colorHex, opts) {
+    opts = opts || {};
     if (!this._debrisGeo) {
       this._debrisGeo = _debrisGeoShared;
       this._debrisMat = new THREE.MeshBasicMaterial({ color: 0x8a8680 });
     }
     const baseColor = colorHex != null ? colorHex : 0x8a8680;
-    const count = DEBRIS_COUNT_MIN + Math.floor(Math.random() * (DEBRIS_COUNT_MAX - DEBRIS_COUNT_MIN + 1));
+    const count =
+      opts.count != null
+        ? opts.count
+        : DEBRIS_COUNT_MIN + Math.floor(Math.random() * (DEBRIS_COUNT_MAX - DEBRIS_COUNT_MIN + 1));
 
     // Cap active debris — drop oldest debris/dust entries
     while (this._countDebrisActive() + count > DEBRIS_ACTIVE_MAX) {
@@ -1242,11 +1370,88 @@
     }
   };
 
+  /**
+   * Explosion chips: even ring in the camera's ground plane so left and right
+   * of the fireball both get voxels. Spawns at the epicenter with no jitter.
+   */
+  Weapons.prototype._spawnRadialDebris = function (x, y, z, colorHex, count) {
+    count = count != null ? count : 18;
+    if (!this._debrisGeo) {
+      this._debrisGeo = _debrisGeoShared;
+      this._debrisMat = new THREE.MeshBasicMaterial({ color: 0x8a8680 });
+    }
+    const baseColor = colorHex != null ? colorHex : 0xc47840;
+    const right = new THREE.Vector3(1, 0, 0);
+    const fwd = new THREE.Vector3(0, 0, -1);
+    const cam = this.player && this.player.camera;
+    if (cam) {
+      cam.updateMatrixWorld();
+      const q = cam.getWorldQuaternion(new THREE.Quaternion());
+      right.set(1, 0, 0).applyQuaternion(q);
+      fwd.set(0, 0, -1).applyQuaternion(q);
+      right.y = 0;
+      fwd.y = 0;
+      if (right.lengthSq() < 0.0001) right.set(1, 0, 0);
+      else right.normalize();
+      if (fwd.lengthSq() < 0.0001) fwd.set(0, 0, -1);
+      else fwd.normalize();
+    }
+
+    while (this._countDebrisActive() + count > DEBRIS_ACTIVE_MAX) {
+      let oldest = -1;
+      for (let i = 0; i < this.impacts.length; i++) {
+        const k = this.impacts[i].kind;
+        if (k === 'debris' || k === 'dust') {
+          oldest = i;
+          break;
+        }
+      }
+      if (oldest < 0) break;
+      const old = this.impacts[oldest];
+      if (old.kind === 'debris') _releaseDebrisMesh(old.mesh);
+      else if (old.kind === 'dust') _releaseDustMesh(old.mesh);
+      else if (old.mesh && old.mesh.parent) this.scene.remove(old.mesh);
+      this.impacts.splice(oldest, 1);
+    }
+
+    for (let i = 0; i < count; i++) {
+      const mesh = _acquireDebrisMesh();
+      const shade = 0.72 + Math.random() * 0.4;
+      const c = new THREE.Color(baseColor);
+      c.multiplyScalar(shade);
+      mesh.material.color.copy(c);
+      mesh.material.opacity = 1;
+      const size = 0.2 + Math.random() * 0.28;
+      mesh.scale.setScalar(size / 0.22);
+      mesh.position.set(x, y, z);
+      const ang = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
+      const spd = 6.5 + Math.random() * 5.5;
+      const vel = new THREE.Vector3()
+        .addScaledVector(right, Math.cos(ang) * spd)
+        .addScaledVector(fwd, Math.sin(ang) * spd);
+      vel.y = 7.5 + Math.random() * 6;
+      const life = 0.95 + Math.random() * 0.45;
+      this.scene.add(mesh);
+      this.impacts.push({
+        kind: 'debris',
+        mesh: mesh,
+        life: life,
+        maxLife: life,
+        vel: vel,
+        spin: 8 + Math.random() * 14,
+        mat: null,
+        pooled: true,
+      });
+    }
+  };
+
   Weapons.prototype.reload = function () {
     if (this.reloading) return;
     if (this.mode !== 'weapon') return;
     if (this.player && this.player.dead) return;
+    if (global.VF.Throwables && global.VF.Throwables.busy && global.VF.Throwables.busy()) return;
     const def = this.getDef();
+    if (def && def.melee) return;
     const ammo = this.getAmmo();
     if (ammo.mag >= def.magSize || ammo.reserve <= 0) return;
 
@@ -1339,7 +1544,16 @@
 
     updateMuzzleFlashes(dt);
 
-    if (this.firing && this.mode === 'weapon' && !this.reloading && this.getDef().automatic) {
+    if (global.VF.Melee && global.VF.Melee.update) {
+      global.VF.Melee.update(this, dt);
+    }
+
+    if (
+      this.firing &&
+      this.mode === 'weapon' &&
+      !this.reloading &&
+      (this.getDef().automatic || this.getDef().melee)
+    ) {
       this.tryFire();
     }
 
@@ -1359,7 +1573,8 @@
           if (gained > 0) global.VF.UI.toast('+' + gained + ' ' + label + ' ammo');
           else global.VF.UI.toast(label + ' ammo full (' + AMMO_RESERVE_MAX + ')');
           const cur = this.getAmmo();
-          global.VF.UI.updateAmmo(cur.mag, cur.reserve);
+          if (this.current === 'knife') global.VF.UI.updateAmmo(null, null);
+          else if (cur) global.VF.UI.updateAmmo(cur.mag, cur.reserve);
         }
         this.scene.remove(d.mesh);
         if (d.mesh.geometry) d.mesh.geometry.dispose();

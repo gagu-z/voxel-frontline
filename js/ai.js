@@ -43,13 +43,71 @@
     return !!(m && m.isRunning());
   }
 
+  /** 枪械模式: teamless like FFA, but progress is weapon level rather than kills. */
+  function ggLive() {
+    const m = global.VF && global.VF.GgMatch;
+    return !!(m && m.isRunning());
+  }
+
+  /** 自由混战 / 枪械模式 share the same hunt-everyone targeting and seek loop. */
+  function teamlessLive() {
+    return ffaLive() || ggLive();
+  }
+
   /**
-   * Compact free-roam arena (死斗 / 爆破 / 自由混战): no fixed team territory, no
-   * ground pickups, no spawn-pad leash. All arena modes share this movement
-   * profile — FFA reuses the 死斗 arena wholesale.
+   * 枪械模式: AI 命中玩家时的爆头概率。项目里 AI 射击是「命中判定 + 固定伤害」，
+   * 本来不产生爆头，那样「被爆头降级」就只有玩家能触发。给 AI 一个爆头掷骰，
+   * 降级机制才是双向的。
+   */
+  function ggHeadshotChance() {
+    const GM = global.VF && global.VF.GameModes;
+    const v = GM && GM.param ? GM.param('aiHeadshotChance', 0.18) : 0.18;
+    return Math.max(0, Math.min(1, v));
+  }
+
+  /** Mode-id check (valid before GgMatch has started, unlike ggLive). */
+  function ggMode() {
+    const GM = global.VF && global.VF.GameModes;
+    return !!(GM && GM.isGg && GM.isGg());
+  }
+
+  /** No teams at all — 自由混战 / 枪械模式 share the "everyone is red" rostering. */
+  function teamlessMode() {
+    const GM = global.VF && global.VF.GameModes;
+    return !!(GM && GM.isTeamless && GM.isTeamless());
+  }
+
+  /** Local human, plus the networked opponent in a 1v1 room. */
+  function teamlessHumanSlots() {
+    return global.VF.game && global.VF.game.mode === 'pvp' ? 2 : 1;
+  }
+
+  /** AI headcount so the board stays at `combatants` including humans. */
+  function teamlessAiCount() {
+    const GM = global.VF && global.VF.GameModes;
+    const combatants = GM && GM.param ? GM.param('combatants', 8) : 8;
+    return Math.max(0, combatants - teamlessHumanSlots());
+  }
+
+  /**
+   * Whichever module scores this match. 枪械模式 and 自由混战 are teamless, 死斗 is
+   * team-based; every guard / damage / kill hook routes through this so the
+   * branch is written once.
+   */
+  function arenaScorer() {
+    const GM = global.VF && global.VF.GameModes;
+    if (GM && GM.isGg && GM.isGg()) return global.VF.GgMatch;
+    if (GM && GM.isFfa && GM.isFfa()) return global.VF.FfaMatch;
+    return global.VF.TdmMatch;
+  }
+
+  /**
+   * Compact free-roam arena (死斗 / 爆破 / 自由混战 / 枪械模式): no fixed team
+   * territory, no ground pickups, no spawn-pad leash. All arena modes share this
+   * movement profile — the teamless modes reuse the 死斗 arena wholesale.
    */
   function arenaMode() {
-    return tdmLive() || sdLive() || ffaLive();
+    return tdmLive() || sdLive() || ffaLive() || ggLive();
   }
 
   function unitDealDamage(unit) {
@@ -560,7 +618,7 @@
       return this._sampleNearAnchor(b.cx, b.cz, HOUSE_PATROL_R, unit.team);
     }
     // base
-    if ((tdmLive() || ffaLive()) && this.world._tdmArenaCenter) {
+    if ((tdmLive() || teamlessLive()) && this.world._tdmArenaCenter) {
       // 死斗: roam the whole compact arena instead of leashing to one spawn
       // cluster, so both teams keep crossing paths near the middle lanes.
       // Both samples pass the unit's own position as `fromPos` so
@@ -595,6 +653,12 @@
 
   AI.prototype._mixTypes = function (total) {
     const list = [];
+    // 枪械模式: 所有人同起点、同血量、同机动，唯一的差别只能是手里那把枪
+    // （applyGgWeapon 按等级改交战数值，不动 hp / speed）。
+    if (ggMode()) {
+      for (let i = 0; i < total; i++) list.push('infantry');
+      return list;
+    }
     const heavies = Math.max(1, Math.floor(total * 0.2));
     const ranged = Math.max(1, Math.floor(total * 0.25));
     const rest = Math.max(0, total - heavies - ranged);
@@ -670,6 +734,28 @@
     };
   };
 
+  /**
+   * 枪械模式: 把单位的交战数值换成它当前武器对应的兵种档（文档 6.3 武器适配交战）。
+   * range 就是交战距离，所以换枪后 AI 自动改用对应的贴脸/中距/远距打法，弹道与
+   * 枪口特效也跟着 type 走。
+   *
+   * 刻意不动 hp / speed：枪械模式讲究「人人平等，只拼枪法适应」，让霰弹兵变成
+   * 140 血的慢坦克会破坏这个前提。
+   */
+  AI.prototype.applyGgWeapon = function (unit, weaponId) {
+    if (!unit) return;
+    const gg = global.VF.GgMatch;
+    const typeKey =
+      (gg && gg.aiTypeForWeapon && gg.aiTypeForWeapon(weaponId)) || 'infantry';
+    const stats = UNIT_STATS[typeKey] || UNIT_STATS.infantry;
+    unit.type = typeKey;
+    unit.damage = stats.damage;
+    unit.range = stats.range;
+    unit.accuracy = stats.accuracy;
+    unit.fireRate = stats.fireRate;
+    unit._ggWeapon = weaponId;
+  };
+
   AI.prototype._notCrowded = function (pos, list, minDist) {
     minDist = minDist != null ? minDist : SEP_DIST;
     for (let i = 0; i < list.length; i++) {
@@ -681,15 +767,14 @@
   AI.prototype._spawnFaction = function (faction) {
     const playerTeam = this.world._playerTeam || 'ally';
     const hasPlayer = !!(global.VF.game && global.VF.game.player);
-    const GM = global.VF && global.VF.GameModes;
-    const ffa = !!(GM && GM.isFfa && GM.isFfa());
+    const teamless = teamlessMode();
     let teamSize;
-    if (ffa) {
-      // 自由混战: the player is the lone ally (blue); every AI combatant fights
-      // on the enemy team (red). All-red keeps the "self blue, everyone else
-      // red" identity automatic, and teamless scoring lives in FfaMatch.
-      const combatants = GM.param ? GM.param('combatants', 8) : 8;
-      teamSize = faction === playerTeam ? 0 : Math.max(0, combatants - 1);
+    if (teamless) {
+      // Always park bots on red, even if this client spawned as the PVP
+      // "enemy" human. Using playerTeam here made the guest fill BLUE instead,
+      // then FFA reinforcements (always 'enemy') added a second red army —
+      // 7+7+player = 15 on one board and 8 on the other.
+      teamSize = faction === 'ally' ? 0 : teamlessAiCount();
     } else {
       // 玩家本身占本阵营一个名额，AI 少生成一个，保证含玩家在内为满编
       const reserve = hasPlayer && faction === playerTeam ? 1 : 0;
@@ -820,7 +905,10 @@
     const playerTeam = this.world._playerTeam || 'ally';
     this.blue = this._spawnFaction('ally');
     this.red = this._spawnFaction('enemy');
-    if (playerTeam === 'ally') {
+    if (teamlessMode()) {
+      this.allies = this.blue.slice();
+      this.enemies = this.red.slice();
+    } else if (playerTeam === 'ally') {
       this.allies = this.blue.slice();
       this.enemies = this.red.slice();
     } else {
@@ -900,7 +988,8 @@
     if (y == null) y = pos.y != null ? pos.y : 0;
 
     const r = Math.random();
-    const type = r < 0.2 ? 'heavy' : r < 0.45 ? 'ranged' : 'infantry';
+    // 枪械模式的兵种由武器等级决定，复活时先统一按 infantry 出场
+    const type = ggMode() ? 'infantry' : r < 0.2 ? 'heavy' : r < 0.45 ? 'ranged' : 'infantry';
     const unit = this._spawnUnit(type, new THREE.Vector3(x, y, z), faction, {
       role: 'base',
       home: this._baseHome(faction),
@@ -919,13 +1008,18 @@
 
     const list = faction === 'enemy' ? this.red : this.blue;
     list.push(unit);
-    const playerTeam = this.world._playerTeam || 'ally';
-    if (playerTeam === 'ally') {
+    if (teamlessMode()) {
       this.allies = this.blue;
       this.enemies = this.red;
     } else {
-      this.allies = this.red;
-      this.enemies = this.blue;
+      const playerTeam = this.world._playerTeam || 'ally';
+      if (playerTeam === 'ally') {
+        this.allies = this.blue;
+        this.enemies = this.red;
+      } else {
+        this.allies = this.red;
+        this.enemies = this.blue;
+      }
     }
     return unit;
   };
@@ -953,6 +1047,13 @@
       const closest = origin.clone().addScaledVector(dir, proj);
       const radius = e.type === 'heavy' ? 1.25 : 1.0;
       if (closest.distanceTo(center) < radius) {
+        if (
+          global.VF.Throwables &&
+          global.VF.Throwables.occludesRay &&
+          global.VF.Throwables.occludesRay(origin, closest)
+        ) {
+          continue;
+        }
         bestDist = proj;
         best = { enemy: e, unit: e, point: closest, dist: proj };
       }
@@ -970,13 +1071,12 @@
    */
   AI.prototype._damageUnit = function (unit, dmg, hitDir, fromPlayer, attacker, opts) {
     if (!unit || !unit.alive) return { killed: false, dmg: 0 };
-    // 死斗 / 自由混战 prep phase: everyone is untouchable until the countdown ends.
-    // `match` resolves to whichever scorer owns this match (team-based TdmMatch or
-    // teamless FfaMatch), so the guard, damage and kill hooks below all route to
-    // the right module without duplicating this branch everywhere.
-    const GM = global.VF.GameModes;
-    const ffa = !!(GM && GM.isFfa && GM.isFfa());
-    const match = ffa ? global.VF.FfaMatch : global.VF.TdmMatch;
+    // 死斗 / 自由混战 / 枪械模式 prep phase: everyone is untouchable until the
+    // countdown ends. `match` resolves to whichever scorer owns this match, so the
+    // guard, damage and kill hooks below all route to the right module without
+    // duplicating this branch everywhere.
+    const teamless = teamlessMode();
+    const match = arenaScorer();
     if (match && match.active && !match.ended && !match.scoringLive()) {
       return { killed: false, dmg: 0 };
     }
@@ -1046,15 +1146,16 @@
           hitDir
         );
       }
-      // 死斗 / 自由混战 score every death on the field, not just the player's
+      // 死斗 / 自由混战 / 枪械模式 score every death on the field, not just the player's
       if (match && match.scoringLive()) {
         match.registerKill({
           victim: unit,
           killer: attacker || null,
           headshot: !!(opts && opts.headshot),
+          weaponId: (opts && opts.weaponId) || null,
           maxHp: unit.maxHp,
         });
-        const spawn = ffa ? global.VF.FfaSpawn : global.VF.TdmSpawn;
+        const spawn = teamless ? global.VF.FfaSpawn : global.VF.TdmSpawn;
         if (spawn && deathPos) {
           spawn.recordDeath(unit.team, deathPos.x, deathPos.z, false);
         }
@@ -1077,7 +1178,7 @@
       }
 
       const playerTeam = this.world._playerTeam || 'ally';
-      if (unit.team !== playerTeam) {
+      if (teamless || unit.team !== playerTeam) {
         if (fromPlayer) {
           this._registerPlayerKill();
         } else if (global.VF.Audio) {
@@ -1447,17 +1548,21 @@
         return false;
       }
     }
+    if (global.VF.Throwables && global.VF.Throwables.occludesRay) {
+      if (global.VF.Throwables.occludesRay(from, to)) return false;
+    }
     return true;
   };
 
   /**
    * The set of units this soldier may target.
-   *   自由混战: everyone else on the field — both internal lists minus self, since
-   *   FFA parks all AI on the enemy team but each one fights every other.
+   *   自由混战 / 枪械模式: everyone else on the field — both internal lists minus
+   *   self, since both modes park all AI on the enemy team but each one fights
+   *   every other (and the player).
    *   死斗 / core: the opposing team's list, as before.
    */
   AI.prototype._foeList = function (unit) {
-    if (ffaLive()) {
+    if (teamlessLive()) {
       const out = [];
       const a = this.allies;
       const e = this.enemies;
@@ -1469,9 +1574,9 @@
     return unit.team === playerTeam ? this.enemies : this.allies;
   };
 
-  /** In FFA every AI hunts the player too; otherwise only the opposing team does. */
+  /** In teamless modes every AI hunts the player too; otherwise only the opposing team does. */
   AI.prototype._targetsPlayer = function (unit) {
-    if (ffaLive()) return true;
+    if (teamlessLive()) return true;
     const playerTeam = this.world._playerTeam || 'ally';
     return unit.team !== playerTeam;
   };
@@ -1888,6 +1993,8 @@
   AI.prototype._tryShoot = function (unit, targetUnit, dt) {
     unit.shootCd -= dt;
     if (unit.shootCd > 0 || !targetUnit || !targetUnit.alive) return;
+    if ((unit.throwBlind || 0) > 0.25) return;
+    if ((unit.throwStun || 0) > 0.2) return;
 
     const from = unit.mesh.position.clone().add(new THREE.Vector3(0, 1.4, 0));
     let to;
@@ -1969,6 +2076,11 @@
       return;
     }
 
+    // 枪械模式: 这一枪属于该单位当前等级的武器——决定击杀能否算进度，
+    // 也决定这一枪能否打出爆头降级。
+    const ggWeapon = ggLive() && global.VF.GgMatch ? global.VF.GgMatch.weaponOfUnit(unit) : null;
+    const ggHeadshot = ggWeapon ? Math.random() < ggHeadshotChance() : false;
+
     if (targetUnit === this.player || targetUnit.isPlayer) {
       if (
         global.VF.Skills &&
@@ -1977,7 +2089,10 @@
         return;
       }
       if (this.player.takeDamage) {
-        this.player.takeDamage(dmg, unit.mesh.position, unit);
+        this.player.takeDamage(dmg, unit.mesh.position, unit, {
+          headshot: ggHeadshot,
+          weaponId: ggWeapon,
+        });
       } else {
         this.player.health = Math.max(0, this.player.health - dmg);
         if (global.VF.UI) {
@@ -1985,7 +2100,10 @@
         }
       }
     } else {
-      this._damageUnit(targetUnit, dmg, null, false, unit);
+      this._damageUnit(targetUnit, dmg, null, false, unit, {
+        headshot: ggHeadshot,
+        weaponId: ggWeapon,
+      });
     }
   };
 
@@ -2127,6 +2245,7 @@
     const t = w.get(x, y, z);
     if (t === BLOCK.AIR || t === BLOCK.WATER) return false;
     if (t === BLOCK.BEDROCK) return false;
+    if (w._isTerrainFill && w._isTerrainFill(x, y, z)) return false;
     if (w._isBaseKeepClear && w._isBaseKeepClear(x, z, 0) && y <= 6) return false;
     if (t === BLOCK.METAL && w.breakBlock) return !!w.breakBlock(x, y, z);
     w.set(x, y, z, BLOCK.AIR);
@@ -2339,6 +2458,7 @@
     dir.normalize();
 
     let step = unit.speed * feelAi().speedMul * (unit._sprintMul || 1) * dt;
+    if ((unit.throwStun || 0) > 0) step *= 0.5;
     const stepCap = MAX_STEP * (unit._sprintMul || 1);
     if (step > stepCap) step = stepCap;
 
@@ -2896,11 +3016,11 @@
     // 爆破: no local threat → pursue the round objective (plant / defend / defuse).
     if (sdLive() && this._sdObjective(unit, dt)) return;
 
-    // 死斗 / 自由混战: nobody in weapon range → advance on the nearest enemy
-    // anywhere on the field instead of idling at spawn. This is the "seek" step
-    // that keeps the arena churning; FFA reuses it verbatim, with _foeList making
-    // "nearest enemy" mean "nearest of everyone else".
-    if (tdmLive() || ffaLive()) {
+    // 死斗 / 自由混战 / 枪械模式: nobody in weapon range → advance on the nearest
+    // enemy anywhere on the field instead of idling at spawn. This is the "seek"
+    // step that keeps the arena churning; teamless modes reuse it verbatim, with
+    // _foeList making "nearest enemy" mean "nearest of everyone else".
+    if (tdmLive() || teamlessLive()) {
       const foe = this._nearestEnemyAnywhere(unit, TDM_SENSE_RANGE);
       if (foe) {
         this._advanceOn(unit, this._spreadGoal(unit, foe.pos), dt);
@@ -3166,7 +3286,10 @@
     }
 
     const playerTeam = this.world._playerTeam || 'ally';
-    if (playerTeam === 'ally') {
+    if (teamlessMode()) {
+      this.allies = this.blue;
+      this.enemies = this.red;
+    } else if (playerTeam === 'ally') {
       this.allies = this.blue;
       this.enemies = this.red;
     } else {
@@ -3186,8 +3309,8 @@
       redN += this._playerHead('enemy');
       if (global.VF.UI) {
         // 死斗 / 爆破 own #timer (match/round clock), so the wave timer stays off it
-        if (tdmLive() || sdLive() || ffaLive()) {
-          /* TdmUi.sync / SdUi.sync / FfaUi.sync drives the clock */
+        if (tdmLive() || sdLive() || teamlessLive()) {
+          /* TdmUi.sync / SdUi.sync / FfaUi.sync / GgUi.sync drives the clock */
         } else if (!(global.VF.game && global.VF.game.mode === 'pvp')) {
           global.VF.UI.updateWave(1, this.waveTimer);
         } else if (

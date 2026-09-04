@@ -101,8 +101,12 @@
     // are instead summoned on demand when a side lands a killstreak.
     // 爆破 forbids airstrikes entirely: single-life rounds must never be decided
     // by stray ordnance, so the sky stays empty (no ambient fleet, no strikes).
+    // 自由混战 keeps the sky empty as well: killstreak rewards are notification
+    // only, so a looping bombardment would just be unattributed random death.
+    // 枪械模式 goes further — a stray bomb kill grants no weapon progress, so an
+    // ambient bombardment would only ever cost people their progress.
     const gm = global.VF.GameModes;
-    this._autoStrike = !(gm && (gm.isTdm() || gm.isSd()));
+    this._autoStrike = !(gm && (gm.isTdm() || gm.isSd() || gm.isTeamless()));
     if (game && game.world && game.world.worldSize) {
       this._worldSize = game.world.worldSize;
     }
@@ -923,6 +927,16 @@
     this._spawnMushroom(pos, m.hostile, game, scale);
     if (airNum('dust', 1) > 0.01) this._spawnDustCloud(pos, scale);
     this._carveLightTerrain(pos, scale, game);
+    if (game && game.world && game.world.deformTerrainCircle) {
+      const R = airNum('carveR', 4.5) * 0.45 * Math.max(0.8, scale);
+      const changed = game.world.deformTerrainCircle(pos.x, pos.z, Math.max(2.2, R), 0.45, {
+        source: 'airstrike',
+        maxDepth: 0.6,
+      });
+      if (changed && game.weapons && game.weapons._syncTerrainDeform) {
+        game.weapons._syncTerrainDeform(pos.x, pos.z, Math.max(2.2, R), 0.45);
+      }
+    }
     this._applyBlastDamage(pos, m.team, m.hostile, scale, game, directPlane);
   };
 

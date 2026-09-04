@@ -66,7 +66,11 @@
     document.addEventListener('keydown', (e) => {
       if (!self.player.locked) return;
       if (global.VF.Range && global.VF.Range.isOpen) return;
-      if (e.code === 'Digit4') self.enterMode('a');
+      if (e.code === 'Digit4') {
+        if (global.VF.Throwables && global.VF.Throwables.busy && global.VF.Throwables.busy()) return;
+        if (global.VF.Melee && global.VF.Melee.available()) return;
+        self.enterMode('a');
+      }
       if (e.code === 'Digit5') self.enterMode('b');
       if (e.code === 'KeyE') self.tryCollect();
       // Rotate cover with Q / R while in build mode
@@ -580,6 +584,7 @@
         const c = cells[i];
         if (this.world.get(c.x, c.y, c.z) === global.VF.BLOCK.AIR) {
           this.world.set(c.x, c.y, c.z, blockType);
+          if (this.world.markManmade) this.world.markManmade(c.x, c.y, c.z);
         }
         const cx = Math.floor(c.x / this.world.chunkSize);
         const cz = Math.floor(c.z / this.world.chunkSize);
@@ -704,6 +709,7 @@
       const c = cells[i];
       if (this.world.get(c.x, c.y, c.z) === global.VF.BLOCK.AIR) {
         this.world.set(c.x, c.y, c.z, blockType);
+        if (this.world.markManmade) this.world.markManmade(c.x, c.y, c.z);
         const base = typeHits[blockType] != null ? typeHits[blockType] : 1;
         const total = base > 0 ? base + extraHits : 0;
         if (total > 1 && this.world.setBlockDurability) {
@@ -764,6 +770,7 @@
           if (this.world.get(x, y, z) === global.VF.BLOCK.AIR) {
             const t = global.VF.BLOCK.STONE;
             this.world.set(x, y, z, t);
+            if (this.world.markManmade) this.world.markManmade(x, y, z);
             const base = typeHits[t] != null ? typeHits[t] : 1;
             const total = base > 0 ? base + extraHits : 0;
             if (total > 1 && this.world.setBlockDurability) {

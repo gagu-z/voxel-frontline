@@ -457,6 +457,12 @@
     if (VF.SdSpawn && VF.SdSpawn.stop) VF.SdSpawn.stop();
     if (VF.SdField && VF.SdField.stop) VF.SdField.stop();
     if (VF.SdUi && VF.SdUi.leave) VF.SdUi.leave();
+    if (VF.FfaMatch && VF.FfaMatch.stop) VF.FfaMatch.stop();
+    if (VF.FfaSpawn && VF.FfaSpawn.stop) VF.FfaSpawn.stop();
+    if (VF.FfaUi && VF.FfaUi.leave) VF.FfaUi.leave();
+    if (VF.GgMatch && VF.GgMatch.stop) VF.GgMatch.stop();
+    if (VF.GgUi && VF.GgUi.leave) VF.GgUi.leave();
+    if (VF.Throwables && VF.Throwables.stop) VF.Throwables.stop();
     if (game.battlefieldEvents && game.battlefieldEvents.stop) game.battlefieldEvents.stop();
     if (document.exitPointerLock) document.exitPointerLock();
     if (VF.UI && VF.UI.hideHud) VF.UI.hideHud();
@@ -696,8 +702,18 @@
 
     const tdm = !!(VF.GameModes && VF.GameModes.isTdm());
     const sd = !!(VF.GameModes && VF.GameModes.isSd());
-    if (tdm && game.world && game.world.generateTdmMap) {
-      // 死斗 runs its own procedural map: no kit stamps, no cores, no crystals
+    // 枪械模式直接复用 自由混战 的随机地图
+    const ffa = !!(VF.GameModes && VF.GameModes.isTeamless && VF.GameModes.isTeamless());
+    if (ffa && game.world && game.world.generateFfaMap) {
+      // 自由混战 / 枪械模式: a dedicated compact 60×60 arena (环+中心 循环流动) — no
+      // kit stamps, no cores, no crystals. Reuses the 死斗 spawn/flow plumbing.
+      if (game.bases && game.bases.detach) game.bases.detach();
+      game.world.generateFfaMap(seed);
+      game.world.applyTdmSpawnPoints();
+      game._mapKitLayout = false;
+    } else if (tdm && game.world && game.world.generateTdmMap) {
+      // 团队死斗 shares the procedural arena: no kit stamps, no cores,
+      // no crystals.
       if (game.bases && game.bases.detach) game.bases.detach();
       game.world.generateTdmMap(seed, {
         heightCap: VF.GameModes.param('mapHeightCap', 26),
@@ -738,7 +754,7 @@
 
     game.mapSeed = seed;
     game._mapReadyForSeed = seed;
-    game._mapKitLayout = !(tdm || sd);
+    game._mapKitLayout = !(tdm || sd || ffa);
     return seed;
   }
 
@@ -765,7 +781,12 @@
     // 死斗 assigns spawns by the safety algorithm, so there is nothing to pick.
     // 爆破 is single-life and side-locked, so it also skips the spawn picker and
     // takes the team's home cluster (per-round respawns are owned by SdSpawn).
-    if (VF.GameModes && (VF.GameModes.isTdm() || VF.GameModes.isSd())) {
+    // 自由混战 / 枪械模式 have no teams — the player takes any home cluster and
+    // FfaSpawn owns every respawn thereafter, so they likewise skip the picker.
+    if (
+      VF.GameModes &&
+      (VF.GameModes.isTdm() || VF.GameModes.isSd() || VF.GameModes.isTeamless())
+    ) {
       assignTdmStartSpawn();
       if (game.mode === 'pvp' && VF.Pvp && VF.Pvp.roomCode) openPvpSpawnGate();
       else beginMatch();
@@ -804,7 +825,11 @@
     if (!w) return null;
 
     let team = null;
-    if (game.mode === 'pvp' && game.pvp && game.pvp.team) team = game.pvp.team;
+    // 自由混战 / 枪械模式: the player is always the lone blue ally, so the "self
+    // blue, everyone else red" identity and player-fire raycasts stay correct no
+    // matter what a previous match locked.
+    if (VF.GameModes && VF.GameModes.isTeamless()) team = 'ally';
+    else if (game.mode === 'pvp' && game.pvp && game.pvp.team) team = game.pvp.team;
     else if (game.teamLocked && game.lockedTeam) team = game.lockedTeam;
     else team = 'ally';
     if (w.setPlayerTeam) w.setPlayerTeam(team);
@@ -954,9 +979,26 @@
         if (VF.SdSpawn) VF.SdSpawn.start();
         if (VF.SdStats) VF.SdStats.start();
         if (VF.SdMatch) VF.SdMatch.start();
+      } else if (VF.GameModes && VF.GameModes.isFfa()) {
+        // 自由混战: teamless. FfaMatch owns the clock + personal scoring, FfaSpawn
+        // owns every respawn (player + AI reinforcements), FfaUi owns the live
+        // leaderboard. No team HUD is touched.
+        if (VF.FfaMatch) VF.FfaMatch.start();
+        if (VF.FfaSpawn) VF.FfaSpawn.start();
+        if (VF.FfaUi) VF.FfaUi.enter();
+      } else if (VF.GameModes && VF.GameModes.isGg()) {
+        // 枪械模式: teamless like 自由混战 and reuses FfaSpawn wholesale. GgMatch owns
+        // the weapon ladder + progress scoring, GgUi owns the progress HUD.
+        if (VF.GgMatch) VF.GgMatch.start();
+        if (VF.FfaSpawn) VF.FfaSpawn.start();
+        if (VF.GgUi) VF.GgUi.enter();
       } else {
         if (VF.TdmMatch) VF.TdmMatch.stop();
         if (VF.TdmUi) VF.TdmUi.leave();
+      }
+      if (VF.Throwables) {
+        if (VF.GameModes && VF.GameModes.isGg && VF.GameModes.isGg()) VF.Throwables.stop();
+        else VF.Throwables.start();
       }
       game._towerGunArmed = false;
       if (game.skills && game.skills.reset) game.skills.reset();
@@ -1001,6 +1043,8 @@
   function matchAlreadyEnded() {
     if (VF.TdmMatch && VF.TdmMatch.active) return VF.TdmMatch.ended;
     if (VF.SdMatch && VF.SdMatch.active) return VF.SdMatch.ended;
+    if (VF.FfaMatch && VF.FfaMatch.active) return VF.FfaMatch.ended;
+    if (VF.GgMatch && VF.GgMatch.active) return VF.GgMatch.ended;
     if (game.bases && (game.bases.won || game.bases.lost)) return true;
     if (game.mode === 'pvp' && VF.Pvp && VF.Pvp._matchEnded) return true;
     return false;
@@ -1100,6 +1144,12 @@
     if (VF.SdSpawn && VF.SdSpawn.stop) VF.SdSpawn.stop();
     if (VF.SdField && VF.SdField.stop) VF.SdField.stop();
     if (VF.SdUi && VF.SdUi.leave) VF.SdUi.leave();
+    if (VF.FfaMatch && VF.FfaMatch.stop) VF.FfaMatch.stop();
+    if (VF.FfaSpawn && VF.FfaSpawn.stop) VF.FfaSpawn.stop();
+    if (VF.FfaUi && VF.FfaUi.leave) VF.FfaUi.leave();
+    if (VF.GgMatch && VF.GgMatch.stop) VF.GgMatch.stop();
+    if (VF.GgUi && VF.GgUi.leave) VF.GgUi.leave();
+    if (VF.Throwables && VF.Throwables.stop) VF.Throwables.stop();
     if (game.battlefieldEvents && game.battlefieldEvents.stop) game.battlefieldEvents.stop();
     if (game.mode === 'pvp' && VF.Pvp && VF.Pvp.leaveLobby) {
       VF.Pvp.leaveLobby();
@@ -1217,6 +1267,22 @@
       }
     }
 
+    // 自由混战 clock + personal scoring + respawns run through the player's own
+    // death (2.5s instant respawn), same as 死斗.
+    if (!rangeOpen && VF.FfaMatch && VF.FfaMatch.active) {
+      VF.FfaMatch.update(dt);
+      if (VF.FfaSpawn && VF.FfaSpawn.update) VF.FfaSpawn.update(dt);
+    }
+
+    // 枪械模式: same teamless clock/respawn plumbing; GgMatch additionally keeps
+    // everyone's weapon aligned with their ladder level every frame.
+    if (!rangeOpen && VF.GgMatch && VF.GgMatch.active) {
+      VF.GgMatch.update(dt);
+      if (VF.FfaSpawn && VF.FfaSpawn.update) VF.FfaSpawn.update(dt);
+    }
+
+    if (!rangeOpen && VF.Throwables && VF.Throwables.update) VF.Throwables.update(dt);
+
     // Deferred voxel mesh rebuilds — prefer chunks around the player so the road loads first
     if (!rangeOpen && game.world && game.world.flushRebuilds) {
       const backlog = game.world._dirtyChunks ? game.world._dirtyChunks.size : 0;
@@ -1285,6 +1351,20 @@
       game.mode !== 'pvp' &&
       VF.SdMatch &&
       VF.SdMatch.isRunning() &&
+      game.player &&
+      game.player.dead &&
+      !VF.UI.isMenuOpen()
+    ) {
+      if (game.ai) game.ai.update(dt);
+      if (game.battlefieldEvents && game.battlefieldEvents.update) {
+        game.battlefieldEvents.update(dt, game);
+      }
+    }
+
+    // 自由混战 / 枪械模式: 2.5s respawn — never freeze the arena while the player is dead.
+    if (
+      game.mode !== 'pvp' &&
+      ((VF.FfaMatch && VF.FfaMatch.isRunning()) || (VF.GgMatch && VF.GgMatch.isRunning())) &&
       game.player &&
       game.player.dead &&
       !VF.UI.isMenuOpen()
