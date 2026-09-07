@@ -240,9 +240,9 @@
         depthWrite: !ghost,
       });
 
-    const stone = mat(0x7a7e84);
-    const wood = mat(0x6b4a2e);
-    const dark = mat(0x3a3e44);
+    const stone = mat(0x8e8f8c);
+    const wood = mat(0x8a7354);
+    const dark = mat(0x4a4e56);
     const flag = mat(0xc4302b);
     const accent = mat(0x4a5a3a);
 

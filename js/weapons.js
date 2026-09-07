@@ -394,6 +394,9 @@
 
   Weapons.prototype.tryFire = function () {
     if (this.player && this.player.dead) return;
+    if (global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen()) {
+      return;
+    }
     if (global.VF.Throwables && global.VF.Throwables.busy && global.VF.Throwables.busy()) return;
     if (this.mode !== 'weapon') return;
     if (this.reloading) return;
@@ -657,6 +660,19 @@
     } else {
       _flashPool.push(pair);
     }
+  }
+
+  function clearMuzzleFlashes() {
+    for (let i = _flashActive.length - 1; i >= 0; i--) {
+      const f = _flashActive[i];
+      if (f.light) f.light.intensity = 0;
+      if (f.pair && f.pair.root) {
+        f.pair.root.scale.setScalar(1);
+        if (f.pair.root.parent) f.pair.root.parent.remove(f.pair.root);
+        _flashPool.push(f.pair);
+      }
+    }
+    _flashActive.length = 0;
   }
 
   function updateMuzzleFlashes(dt) {
@@ -1532,6 +1548,42 @@
     const u = (t - 0.72) / 0.28;
     const s = u * u * (3 - 2 * u);
     return 1 - s;
+  };
+
+  /** Remove leftover tracers / debris / flashes so a new match starts clean. */
+  Weapons.prototype.clearWorldFx = function () {
+    for (let i = this.impacts.length - 1; i >= 0; i--) {
+      const p = this.impacts[i];
+      if (p.pooled && p.kind === 'debris') _releaseDebrisMesh(p.mesh);
+      else if (p.pooled && p.kind === 'dust') _releaseDustMesh(p.mesh);
+      else if (p.mesh) {
+        this.scene.remove(p.mesh);
+        if (p.mat) p.mat.dispose();
+      }
+    }
+    this.impacts.length = 0;
+    for (let i = this.tracers.length - 1; i >= 0; i--) {
+      const t = this.tracers[i];
+      if (t.mesh) {
+        this.scene.remove(t.mesh);
+        if (t.mesh.material) t.mesh.material.dispose();
+      }
+    }
+    this.tracers.length = 0;
+    for (let i = this.ammoDrops.length - 1; i >= 0; i--) {
+      const d = this.ammoDrops[i];
+      if (d.mesh) {
+        this.scene.remove(d.mesh);
+        if (d.mesh.geometry) d.mesh.geometry.dispose();
+        if (d.mesh.material) d.mesh.material.dispose();
+      }
+    }
+    this.ammoDrops.length = 0;
+    clearMuzzleFlashes();
+    if (this._reloadSfxTimer) {
+      clearTimeout(this._reloadSfxTimer);
+      this._reloadSfxTimer = 0;
+    }
   };
 
   Weapons.prototype.update = function (dt) {

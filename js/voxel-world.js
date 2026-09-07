@@ -33,23 +33,23 @@
   };
 
   const COLORS = {
-    [BLOCK.GRASS]: 0x3d6b2e,
-    [BLOCK.DIRT]: 0x6b4a2e,
-    [BLOCK.STONE]: 0x6e7278,
-    [BLOCK.CONCRETE]: 0x9a968e,
-    [BLOCK.RUST]: 0x8b4518,
-    [BLOCK.METAL]: 0x4a5560,
-    [BLOCK.ROAD]: 0x2a2c30,
-    [BLOCK.WATER]: 0x2a5a7a,
-    [BLOCK.RUBBLE]: 0x5a5048,
-    [BLOCK.BRICK]: 0x8a3a2a,
-    [BLOCK.PLASTER]: 0xd8d2c4,
-    [BLOCK.ROOF]: 0x5a4030,
-    [BLOCK.GLASS]: 0x6a9aaa,
-    [BLOCK.ASPHALT]: 0x222428,
-    [BLOCK.BEDROCK]: 0x1a1c22,
-    [BLOCK.SMOKE]: 0x8a8882,
-    [BLOCK.SMOKE_LIGHT]: 0xa8a6a0,
+    [BLOCK.GRASS]: 0x5a8a42,
+    [BLOCK.DIRT]: 0x8a7354,
+    [BLOCK.STONE]: 0x8e8f8c,
+    [BLOCK.CONCRETE]: 0xb8b3a8,
+    [BLOCK.RUST]: 0xa85a2e,
+    [BLOCK.METAL]: 0x66758a,
+    [BLOCK.ROAD]: 0x535860,
+    [BLOCK.WATER]: 0x4a88a8,
+    [BLOCK.RUBBLE]: 0x7a7266,
+    [BLOCK.BRICK]: 0xb45a44,
+    [BLOCK.PLASTER]: 0xe6e0d4,
+    [BLOCK.ROOF]: 0x7a5844,
+    [BLOCK.GLASS]: 0x8ec4d8,
+    [BLOCK.ASPHALT]: 0x4a4e56,
+    [BLOCK.BEDROCK]: 0x3a3c42,
+    [BLOCK.SMOKE]: 0x9a9892,
+    [BLOCK.SMOKE_LIGHT]: 0xb8b6b0,
     [BLOCK.PAINT_RED]: 0x8a1a1a,
     [BLOCK.PAINT_BLUE]: 0x1a3a8a,
   };
@@ -2778,7 +2778,7 @@
       cz: shaft.z + shaft.d / 2,
       yStart: gy + 2,
       yEnd: roofY,
-      color: 0x6b4a2e,
+      color: 0x8a7354,
       radius: 2.2,
       landingR: 2,
     });
@@ -4311,7 +4311,7 @@
               const d = face.d[v];
               positions.push(x + d[0], y + d[1], z + d[2]);
               normals.push(face.n[0], face.n[1], face.n[2]);
-              const shade = 0.72 + 0.28 * Math.max(0, face.n[1]);
+              const shade = 0.86 + 0.14 * Math.max(0, face.n[1]);
               colors.push(col.r * shade, col.g * shade, col.b * shade);
             }
             indices.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);

@@ -47,6 +47,9 @@
     lastState: null,
     flashEl: null,
     siteHud: null,
+    boomRaf: 0,
+    boomTimers: [],
+    boomKill: null,
   };
 
   const Field = {
@@ -64,6 +67,7 @@
     stop: function () {
       state.active = false;
       state.lastState = null;
+      this._killDetonation();
       this._removeMesh();
       this._removeSiteMarkers();
       this._removeSiteHud();
@@ -715,13 +719,34 @@
      * A genuinely violent explosion: white-hot core → layered fireball → rising
      * smoke/mushroom stem → expanding ground shocks → voxel debris + sparks,
      * plus a point-light burst, a full-screen flash and distance-scaled camera
-     * shake. Fully self-contained (owns its rAF loop + disposal) so it survives
-     * the round→RESULT phase transition without depending on the game loop.
+     * shake. Owns its rAF loop so it can finish through the round→RESULT
+     * overlay; _killDetonation() cancels it when a new match starts.
      */
+    _killDetonation: function () {
+      if (state.boomRaf) {
+        cancelAnimationFrame(state.boomRaf);
+        state.boomRaf = 0;
+      }
+      const timers = state.boomTimers;
+      if (timers && timers.length) {
+        for (let i = 0; i < timers.length; i++) clearTimeout(timers[i]);
+        timers.length = 0;
+      }
+      if (state.boomKill) {
+        const fn = state.boomKill;
+        state.boomKill = null;
+        try {
+          fn();
+        } catch (_) {}
+      }
+      this._removeFlash();
+    },
+
     _spawnDetonation: function (pos) {
       const g = VF.game;
       const scene = g && g.scene;
       if (!scene || typeof THREE === 'undefined') return;
+      this._killDetonation();
 
       const p = {
         x: pos ? pos.x : 0,
@@ -734,9 +759,8 @@
       const A = VF.Audio;
       if (A && A.play) {
         A.play('explosion');
-        A.play('distant_rumble');
-        setTimeout(function () { if (A.play) A.play('explosion'); }, 130);
-        setTimeout(function () { if (A.play) A.play('distant_rumble'); }, 340);
+        state.boomTimers = [];
+        state.boomTimers.push(setTimeout(function () { if (A.play) A.play('explosion'); }, 90));
       }
 
       const player = g && g.player;
@@ -851,7 +875,9 @@
       const floor = p.y + 0.2;
       const start = performance.now();
       let lastShake = 0;
+      let dead = false;
       const tick = function () {
+        if (dead) return;
         const age = (performance.now() - start) / 1000;
         const dt = 0.016;
 
@@ -924,15 +950,30 @@
         light.position.y = p.y + 2 + Math.min(6, age * 8);
 
         if (age < 3.0 && (debris.length > 0 || sparks.length > 0 || age < 1.5)) {
-          requestAnimationFrame(tick);
+          state.boomRaf = requestAnimationFrame(tick);
           return;
         }
 
-        const kill = [core, fire, fire2, smoke, stem];
-        for (let i = 0; i < kill.length; i++) {
-          scene.remove(kill[i]);
-          kill[i].geometry.dispose();
-          kill[i].material.dispose();
+        kill();
+      };
+
+      const kill = function () {
+        if (dead) return;
+        dead = true;
+        if (state.boomRaf) {
+          cancelAnimationFrame(state.boomRaf);
+          state.boomRaf = 0;
+        }
+        const timers = state.boomTimers;
+        if (timers && timers.length) {
+          for (let i = 0; i < timers.length; i++) clearTimeout(timers[i]);
+          timers.length = 0;
+        }
+        const drop = [core, fire, fire2, smoke, stem];
+        for (let i = 0; i < drop.length; i++) {
+          scene.remove(drop[i]);
+          drop[i].geometry.dispose();
+          drop[i].material.dispose();
         }
         for (let i = 0; i < rings.length; i++) {
           scene.remove(rings[i].mesh);
@@ -944,14 +985,18 @@
           debris[i].geo.dispose();
           debris[i].mesh.material.dispose();
         }
+        debris.length = 0;
         for (let i = 0; i < sparks.length; i++) {
           scene.remove(sparks[i].mesh);
           sparks[i].geo.dispose();
           sparks[i].mesh.material.dispose();
         }
+        sparks.length = 0;
         scene.remove(light);
+        if (state.boomKill === kill) state.boomKill = null;
       };
-      requestAnimationFrame(tick);
+      state.boomKill = kill;
+      state.boomRaf = requestAnimationFrame(tick);
     },
 
     /** Brief full-screen blast flash (over HUD, under nothing that needs input). */

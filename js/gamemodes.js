@@ -406,6 +406,22 @@
     return isFfa() || isGg();
   }
 
+  /**
+   * Countdown before combat: player may look around but cannot move or attack.
+   * Covers TDM/FFA/GG prep and demolition buy.
+   */
+  function prepFrozen() {
+    const tdm = VF.TdmMatch;
+    if (tdm && tdm.active && !tdm.ended && tdm.phase === 'prep') return true;
+    const ffa = VF.FfaMatch;
+    if (ffa && ffa.active && !ffa.ended && ffa.phase === 'prep') return true;
+    const gg = VF.GgMatch;
+    if (gg && gg.active && !gg.ended && gg.phase === 'prep') return true;
+    const sd = VF.SdMatch;
+    if (sd && sd.active && !sd.matchOver && sd.phase === 'buy') return true;
+    return false;
+  }
+
   /* ───────────────────────── 模式选择界面 ───────────────────────── */
 
   function els() {
@@ -608,6 +624,7 @@
     isFfa: isFfa,
     isGg: isGg,
     isTeamless: isTeamless,
+    prepFrozen: prepFrozen,
     restore: function () {
       return setMode(readStored());
     },

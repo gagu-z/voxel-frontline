@@ -11,19 +11,19 @@
   const GRID_D = 13;
 
   const PALETTE = [
-    { id: 'grass', block: 1, color: 0x3d6b2e, name: '草地', hits: 1, unit: 2 },
-    { id: 'dirt', block: 2, color: 0x6b4a2e, name: '泥土', hits: 1, unit: 2 },
-    { id: 'rubble', block: 9, color: 0x5a5048, name: '废墟', hits: 1, unit: 2 },
-    { id: 'stone', block: 3, color: 0x6e7278, name: '石块', hits: 2, unit: 3 },
-    { id: 'road', block: 7, color: 0x2a2c30, name: '路面', hits: 2, unit: 3 },
-    { id: 'asphalt', block: 14, color: 0x222428, name: '沥青', hits: 2, unit: 3 },
-    { id: 'wood', block: 12, color: 0x5a4030, name: '木板', hits: 1, unit: 3 },
-    { id: 'plaster', block: 11, color: 0xd8d2c4, name: '灰泥', hits: 1, unit: 3 },
-    { id: 'brick', block: 10, color: 0x8a3a2a, name: '砖块', hits: 2, unit: 4 },
-    { id: 'rust', block: 5, color: 0x8b4518, name: '锈铁', hits: 2, unit: 4 },
-    { id: 'glass', block: 13, color: 0x6a9aaa, name: '玻璃', hits: 1, unit: 4 },
-    { id: 'concrete', block: 4, color: 0x9a968e, name: '混凝土', hits: 3, unit: 5 },
-    { id: 'metal', block: 6, color: 0x4a5560, name: '金属', hits: 5, unit: 8 },
+    { id: 'grass', block: 1, color: 0x5a8a42, name: '草地', hits: 1, unit: 2 },
+    { id: 'dirt', block: 2, color: 0x8a7354, name: '泥土', hits: 1, unit: 2 },
+    { id: 'rubble', block: 9, color: 0x7a7266, name: '废墟', hits: 1, unit: 2 },
+    { id: 'stone', block: 3, color: 0x8e8f8c, name: '石块', hits: 2, unit: 3 },
+    { id: 'road', block: 7, color: 0x535860, name: '路面', hits: 2, unit: 3 },
+    { id: 'asphalt', block: 14, color: 0x4a4e56, name: '沥青', hits: 2, unit: 3 },
+    { id: 'wood', block: 12, color: 0x7a5844, name: '木板', hits: 1, unit: 3 },
+    { id: 'plaster', block: 11, color: 0xe6e0d4, name: '灰泥', hits: 1, unit: 3 },
+    { id: 'brick', block: 10, color: 0xb45a44, name: '砖块', hits: 2, unit: 4 },
+    { id: 'rust', block: 5, color: 0xa85a2e, name: '锈铁', hits: 2, unit: 4 },
+    { id: 'glass', block: 13, color: 0x8ec4d8, name: '玻璃', hits: 1, unit: 4 },
+    { id: 'concrete', block: 4, color: 0xb8b3a8, name: '混凝土', hits: 3, unit: 5 },
+    { id: 'metal', block: 6, color: 0x66758a, name: '金属', hits: 5, unit: 8 },
   ];
 
   function fixPalette() {
@@ -264,12 +264,12 @@
     PALETTE.forEach((p) => {
       colors[p.block] = p.color;
     });
-    colors[B.STONE] = colors[B.STONE] || 0x6e7278;
-    colors[B.CONCRETE] = colors[B.CONCRETE] || 0x9a968e;
-    colors[B.BRICK] = colors[B.BRICK] || 0x8a3a2a;
-    colors[B.METAL] = colors[B.METAL] || 0x4a5560;
-    colors[B.ROOF] = colors[B.ROOF] || 0x5a4030;
-    colors[B.GLASS] = colors[B.GLASS] || 0x6a9aaa;
+    colors[B.STONE] = colors[B.STONE] || 0x8e8f8c;
+    colors[B.CONCRETE] = colors[B.CONCRETE] || 0xb8b3a8;
+    colors[B.BRICK] = colors[B.BRICK] || 0xb45a44;
+    colors[B.METAL] = colors[B.METAL] || 0x66758a;
+    colors[B.ROOF] = colors[B.ROOF] || 0x7a5844;
+    colors[B.GLASS] = colors[B.GLASS] || 0x8ec4d8;
 
     const matCache = {};
     const getMat = (block) => {

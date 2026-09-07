@@ -381,18 +381,23 @@
 
   /** First walkable top-face at or below (x,y,z). */
   function groundY(world, x, y, z) {
-    if (world && world.getWalkHeight) {
-      const top = world.getWalkHeight(x, z);
-      if (top != null && isFinite(top)) return top + 0.04;
-    }
+    const terrain = terrainTopAt(world, x, z);
+    const floor = terrain != null && isFinite(terrain) ? terrain + 0.04 : null;
+    // Deliberately not world.getWalkHeight: that answers with the highest
+    // surface in the whole column, so an effect that landed on the street
+    // under a bridge, or on a lower floor indoors, gets moved up onto the
+    // deck or the roof and does nothing where it actually hit. Walk down
+    // from the impact and take the first structure top face instead, then
+    // fall back to the terrain, which carries finer height detail.
+    const stop = floor != null ? floor : y - 12;
     let gy = y + 0.15;
-    for (let i = 0; i < 48; i++) {
-      if (!isSolid(world, x, gy, z) && isSolid(world, x, gy - 0.25, z)) {
+    for (let i = 0; i < 400 && gy - 0.25 > stop; i++) {
+      if (!isVoxelSolid(world, x, gy, z) && isVoxelSolid(world, x, gy - 0.25, z)) {
         return Math.floor(gy - 0.25) + 1.04;
       }
       gy -= 0.25;
     }
-    return y;
+    return floor != null ? floor : y;
   }
 
   function fxMat(color, opacity, additive) {
@@ -408,6 +413,341 @@
     return new THREE.MeshBasicMaterial(o);
   }
 
+  // Block volumes, but not posterized voxel-art: mild face shade, real alpha,
+  // and fog that does not bleach dark smoke back to wall-grey.
+  const VOXEL_BOX = new THREE.BoxGeometry(1, 1, 1);
+  const VOXEL_VERT = `
+varying vec3 vN;
+varying vec3 vWorld;
+varying vec3 vCenter;
+varying vec3 vRadius;
+void main() {
+  vN = normalize(mat3(modelMatrix) * normal);
+  vCenter = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vRadius = vec3(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz), length(modelMatrix[2].xyz)) * 0.5;
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vWorld = w.xyz;
+  gl_Position = projectionMatrix * viewMatrix * w;
+}
+`;
+  const VOXEL_FRAG = `
+uniform vec3 uColor;
+uniform float uOpacity;
+uniform float uEmi;
+uniform float uPixel;
+uniform float uTime;
+uniform float uUseFog;
+uniform float uFogNear;
+uniform float uFogFar;
+uniform float uFogAmt;
+uniform float uSoft;
+uniform float uAlphaCut;
+uniform float uCloudY0;
+uniform float uCloudH;
+uniform vec3 uFogColor;
+varying vec3 vN;
+varying vec3 vWorld;
+varying vec3 vCenter;
+varying vec3 vRadius;
+float hash13(vec3 p) {
+  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+float vnoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = hash13(i);
+  float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
+  float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
+  float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
+  float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
+  float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
+  float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
+  float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
+  float nx00 = mix(n000, n100, f.x);
+  float nx10 = mix(n010, n110, f.x);
+  float nx01 = mix(n001, n101, f.x);
+  float nx11 = mix(n011, n111, f.x);
+  return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z);
+}
+void main() {
+  vec3 n = normalize(vN);
+  float shade = 0.88 + 0.12 * n.y;
+  float px = max(uPixel, 1.5);
+  vec3 cell = floor(vWorld * px);
+  float speckle = hash13(cell);
+  vec3 col = uColor * shade * (0.94 + speckle * 0.08);
+  col += uColor * uEmi;
+  float a = uOpacity;
+  if (uSoft > 0.5) {
+    // Alpha comes from how much of the puff's ellipsoid the view ray crosses.
+    // A box surface can never give a volume falloff, so solve the volume here;
+    // the cube's own faces then stay invisible instead of showing as seams.
+    vec3 rd = normalize(vWorld - cameraPosition);
+    vec3 ro = (cameraPosition - vCenter) / vRadius;
+    vec3 rdn = rd / vRadius;
+    float qa = dot(rdn, rdn);
+    float qb = 2.0 * dot(ro, rdn);
+    float qc = dot(ro, ro) - 1.0;
+    float disc = qb * qb - 4.0 * qa * qc;
+    if (disc <= 0.0) discard;
+    float sq = sqrt(disc);
+    float t0 = max((-qb - sq) / (2.0 * qa), 0.0);
+    float t1 = (-qb + sq) / (2.0 * qa);
+    if (t1 <= t0) discard;
+    // Only the fire's thin drifting smoke uses this path now; the smoke
+    // grenade is built from real voxels instead.
+    vec3 pSurf = cameraPosition + rd * t0;
+    vec3 pRef = cameraPosition + rd * ((t0 + t1) * 0.5);
+    float f =
+      vnoise(pRef * 0.42 + uTime * 0.035) * 0.58 +
+      vnoise(pRef * 1.15 - uTime * 0.07) * 0.29 +
+      vnoise(pRef * 2.9 + 11.0) * 0.13;
+    a = 1.0 - exp(-(t1 - t0) * uOpacity * (0.25 + f * 1.5));
+    a *= smoothstep(0.0, 0.34, f - 0.1);
+    float hT = clamp((pSurf.y - uCloudY0) / max(0.001, uCloudH), 0.0, 1.0);
+    float grain = vnoise(pSurf * 1.5 + 4.3) * 0.62 + vnoise(pSurf * 3.4 - 2.1) * 0.38;
+    float lift = mix(0.62, 1.2, smoothstep(0.02, 0.98, hT)) * (0.86 + grain * 0.28);
+    col = uColor * (floor(lift * 9.0) / 9.0 + 0.06);
+  }
+  // Depth-only twins discard their faint outer gradient so they only occupy
+  // the depth buffer where the cloud is thick enough to hide what is behind.
+  if (a < uAlphaCut) discard;
+  if (uUseFog > 0.5) {
+    float fogT = smoothstep(uFogNear, uFogFar, length(vWorld - cameraPosition));
+    fogT *= 1.0 - clamp(uEmi, 0.0, 1.0);
+    col = mix(col, uFogColor, fogT * uFogAmt);
+  }
+  gl_FragColor = vec4(col, a);
+}
+`;
+
+  // Smoke is built as one merged block of world-grid voxels rather than soft
+  // sprites: any transparent volume, however it is shaded, ends up reading as
+  // foam or bubbles. Cells grow in from the ground up as the cloud expands and
+  // dissolve through an ordered dither as it thins, so the material stays
+  // opaque the whole time — which also means the fog pass sees real depth.
+  const SMOKE_VERT = `
+attribute vec3 aCenter;
+attribute float aDist;
+attribute float aRim;
+attribute float aRnd;
+uniform float uFill;
+uniform float uDens;
+uniform float uTime;
+varying vec3 vN;
+varying vec3 vWorld;
+varying float vRim;
+varying float vRnd;
+void main() {
+  vN = normalize(mat3(modelMatrix) * normal);
+  vRim = aRim;
+  vRnd = aRnd;
+  // Same pop, ramp and dens mix as the solid pass. The only change is the
+  // fill axis: height from the ground instead of horizontal radius from the
+  // middle, so the column no longer arrives at full height first.
+  // Per-cell jitter and a wider ramp keep the rising front from reading as
+  // a flat layer of cubes switching on together.
+  float j = (aRnd - 0.5) * 1.2;
+  float s = clamp((uFill - aCenter.y + j) / 1.15, 0.0, 1.0);
+  s = s * s * (3.0 - 2.0 * s);
+  s *= mix(0.86, 1.0, uDens);
+  // Drift is a smooth function of where the cell sits, not of the cell's own
+  // random seed: neighbours have to move together or the block faces pull
+  // apart and the cloud shows cracks.
+  vec3 drift = vec3(
+    sin(aCenter.z * 0.5 + uTime * 0.5),
+    sin(aCenter.x * 0.42 + uTime * 0.41) * 0.6,
+    cos(aCenter.x * 0.47 + uTime * 0.46)
+  ) * 0.09;
+  vec3 local = aCenter + drift + (position - aCenter) * s;
+  vec4 w = modelMatrix * vec4(local, 1.0);
+  vWorld = w.xyz;
+  gl_Position = projectionMatrix * viewMatrix * w;
+}
+`;
+  const SMOKE_FRAG = `
+uniform vec3 uColor;
+uniform float uDens;
+uniform float uTime;
+uniform float uY0;
+uniform float uH;
+uniform float uUseFog;
+uniform float uFogNear;
+uniform float uFogFar;
+uniform float uFogAmt;
+uniform vec3 uFogColor;
+varying vec3 vN;
+varying vec3 vWorld;
+varying float vRim;
+varying float vRnd;
+float bayer2(vec2 a) {
+  a = floor(a);
+  return fract(a.x * 0.5 + a.y * a.y * 0.75);
+}
+float bayer4(vec2 a) {
+  return bayer2(a * 0.5) * 0.25 + bayer2(a);
+}
+void main() {
+  // Ordered dither, in screen space and at pixel scale, is how the fringe and
+  // the dissolve stay chunky instead of turning into a soft gradient.
+  float cover = mix(1.0, 0.6, vRim);
+  float flick = fract(sin((vRnd + floor(uTime * 2.5)) * 91.7) * 4137.13);
+  cover -= vRim * 0.16 * step(0.62, flick);
+  cover *= smoothstep(0.0, 0.9, uDens);
+  if (cover < bayer4(gl_FragCoord.xy)) discard;
+  float face = 0.88 + 0.26 * vN.y + 0.07 * vN.x - 0.06 * vN.z;
+  // Inner walls, seen through a gap, read as a cavity rather than a lit face.
+  if (!gl_FrontFacing) face *= 0.55;
+  float lift = mix(0.74, 1.18, clamp((vWorld.y - uY0) / max(0.001, uH), 0.0, 1.0));
+  float tone = face * lift * (0.93 + vRnd * 0.14);
+  vec3 col = uColor * (floor(tone * 6.0 + 0.5) / 6.0);
+  if (uUseFog > 0.5) {
+    float fogT = smoothstep(uFogNear, uFogFar, length(vWorld - cameraPosition));
+    col = mix(col, uFogColor, fogT * uFogAmt);
+  }
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+  function makeSmokeVoxelMat(opts) {
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(opts.color) },
+        uDens: { value: 1 },
+        uFill: { value: 0 },
+        uTime: { value: 0 },
+        uY0: { value: opts.y0 || 0 },
+        uH: { value: opts.h || 1 },
+        uUseFog: { value: 1 },
+        uFogNear: { value: 70 },
+        uFogFar: { value: 340 },
+        uFogAmt: { value: 0.14 },
+        uFogColor: { value: new THREE.Color(0xbcd6ea) },
+      },
+      vertexShader: SMOKE_VERT,
+      fragmentShader: SMOKE_FRAG,
+      transparent: false,
+      depthWrite: true,
+      depthTest: true,
+      // Double sided so that a gap in the shell shows the cloud's own inner
+      // wall instead of a bright window straight through to the sky.
+      side: THREE.DoubleSide,
+      fog: false,
+      toneMapped: false,
+    });
+    return mat;
+  }
+
+  function makeVoxelMat(opts) {
+    opts = opts || {};
+    const soft = !!opts.soft;
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(opts.color || 0xffffff) },
+        uOpacity: { value: opts.opacity != null ? opts.opacity : 1 },
+        uEmi: { value: opts.emi || 0 },
+        uPixel: { value: opts.pixel != null ? opts.pixel : 5 },
+        uTime: { value: 0 },
+        uUseFog: { value: 1 },
+        uFogNear: { value: 70 },
+        uFogFar: { value: 340 },
+        uFogAmt: { value: opts.fogAmt != null ? opts.fogAmt : 0.28 },
+        uSoft: { value: soft ? 1 : 0 },
+        uAlphaCut: { value: opts.alphaCut != null ? opts.alphaCut : 0.02 },
+        uCloudY0: { value: opts.cloudY0 || 0 },
+        uCloudH: { value: opts.cloudH || 1 },
+        uFogColor: { value: new THREE.Color(0xbcd6ea) },
+      },
+      vertexShader: VOXEL_VERT,
+      fragmentShader: VOXEL_FRAG,
+      transparent: opts.opaque ? false : soft || (opts.opacity != null && opts.opacity < 0.97),
+      depthWrite:
+        opts.depthWrite != null
+          ? !!opts.depthWrite
+          : !!(opts.opaque || (!soft && opts.depthWrite !== false && !(opts.opacity != null && opts.opacity < 0.85))),
+      depthTest: true,
+      fog: false,
+      toneMapped: opts.toneMapped !== false,
+    });
+    mat.userData.baseOp = opts.opacity != null ? opts.opacity : 1;
+    mat.userData.baseEmi = opts.emi || 0;
+    return mat;
+  }
+
+  function syncVoxelFog(mat) {
+    if (!mat || !mat.uniforms) return;
+    const fog = VF.game && VF.game.scene && VF.game.scene.fog;
+    if (!fog) {
+      mat.uniforms.uUseFog.value = 0;
+      return;
+    }
+    mat.uniforms.uUseFog.value = 1;
+    mat.uniforms.uFogNear.value = fog.near;
+    mat.uniforms.uFogFar.value = fog.far;
+    mat.uniforms.uFogColor.value.copy(fog.color);
+  }
+
+  function tickVoxelMats(mats, fade, time) {
+    if (!mats) return;
+    for (let i = 0; i < mats.length; i++) {
+      const mat = mats[i];
+      if (!mat || !mat.uniforms) continue;
+      const base = mat.userData.baseOp != null ? mat.userData.baseOp : 1;
+      mat.uniforms.uOpacity.value = base * fade;
+      mat.uniforms.uEmi.value = (mat.userData.baseEmi || 0) * fade;
+      mat.uniforms.uTime.value = time;
+      syncVoxelFog(mat);
+    }
+  }
+
+  function snapG(v, g) {
+    return Math.round(v / g) * g;
+  }
+
+  function addVoxel(root, mat, x, y, z, sx, sy, sz, data) {
+    const key = (data && data.key) || snapG(x, 0.12) + ',' + snapG(y, 0.12) + ',' + snapG(z, 0.12);
+    const occ = root.userData.occ || (root.userData.occ = {});
+    if (occ[key]) return null;
+    occ[key] = 1;
+    const mesh = new THREE.Mesh(VOXEL_BOX, mat);
+    mesh.position.set(x, y, z);
+    mesh.scale.set(sx, sy, sz);
+    mesh.frustumCulled = false;
+    if (data) {
+      for (const k in data) {
+        if (k !== 'key') mesh.userData[k] = data[k];
+      }
+    }
+    mesh.userData.baseX = x;
+    mesh.userData.baseY = y;
+    mesh.userData.baseZ = z;
+    mesh.userData.baseScaleX = sx;
+    mesh.userData.baseScaleY = sy;
+    mesh.userData.baseScaleZ = sz;
+    if (data && data.hidden) mesh.visible = false;
+    root.add(mesh);
+    return mesh;
+  }
+
+  function disposeZoneMesh(mesh) {
+    if (!mesh) return;
+    if (mesh.parent) mesh.parent.remove(mesh);
+    const seen = [];
+    mesh.traverse(function (n) {
+      // Only geometry built for this effect; the shared unit box must survive.
+      if (n.geometry && n.geometry.userData.owned && n.geometry.dispose) n.geometry.dispose();
+      if (!n.material) return;
+      const list = Array.isArray(n.material) ? n.material : [n.material];
+      for (let i = 0; i < list.length; i++) {
+        const m = list[i];
+        if (!m || seen.indexOf(m) >= 0) continue;
+        seen.push(m);
+        if (m.dispose) m.dispose();
+      }
+    });
+  }
+
   function smokeDensity(z) {
     if (!z || z.kind !== 'smoke') return 0;
     if (z.phase === 'stable') return 1;
@@ -420,46 +760,6 @@
       return Math.max(0, (z.fadeLeft != null ? z.fadeLeft : 0) / f);
     }
     return 0.5;
-  }
-
-  /** Overlapping puffs that fill a cylinder of radius maxR (the ground ring). */
-  function fillSmokeCloud(world, ox, oy, oz, maxR) {
-    const slots = [];
-    const push = function (x, y, z) {
-      if (isSolid(world, x, y, z)) return;
-      if (!voxelLos(world, ox, oy, oz, x, y, z)) return;
-      const dx = x - ox;
-      const dz = z - oz;
-      slots.push({
-        x: x,
-        y: y,
-        z: z,
-        d: Math.sqrt(dx * dx + dz * dz),
-      });
-    };
-    const rings = [
-      { y: 0.15, rs: [0, 1.55, 3.05, 4.45] },
-      { y: 1.15, rs: [0.9, 2.45, 4.15] },
-      { y: 2.15, rs: [0.5, 2.05, 3.55] },
-    ];
-    for (let li = 0; li < rings.length; li++) {
-      const layer = rings[li];
-      for (let ri = 0; ri < layer.rs.length; ri++) {
-        const rad = layer.rs[ri];
-        if (rad > maxR - 0.15) continue;
-        const n = rad < 0.2 ? 1 : Math.max(5, Math.round((rad * 2.1) + 4));
-        const spin = li * 0.22 + ri * 0.17;
-        for (let i = 0; i < n; i++) {
-          const ang = spin + (i / n) * Math.PI * 2;
-          const jr = rad < 0.2 ? 0 : (i % 2 === 0 ? 0.12 : -0.1);
-          const x = ox + Math.cos(ang) * (rad + jr);
-          const z = oz + Math.sin(ang) * (rad + jr);
-          const y = oy + layer.y + ((i + li) % 3) * 0.12 - 0.12;
-          push(x, y, z);
-        }
-      }
-    }
-    return slots;
   }
 
   function segHitsPoint(ax, ay, az, bx, by, bz, px, py, pz, r2) {
@@ -793,7 +1093,7 @@
       state.wantThrow = false;
       state.thrown = false;
       this._showHeldVm();
-      if (VF.Audio) VF.Audio.play('reload_start');
+      if (VF.Audio) VF.Audio.play('nade_pin');
     },
 
     _updateHold: function (dt) {
@@ -895,7 +1195,7 @@
       state.thrown = true;
       this._consume();
       this._hideHeldItem(true);
-      if (VF.Audio) VF.Audio.play('c4_plant');
+      if (VF.Audio) VF.Audio.play('nade_throw');
     },
 
     _holster: function () {
@@ -1119,6 +1419,14 @@
           g.landed = true;
           g.settled = true;
           g.vx = g.vy = g.vz = 0;
+          // An impact fuse is lit by a collision and by nothing else, so one
+          // that never registers a hit has to be set off here or it hangs in
+          // the air, inert and invisible, for the rest of the round.
+          if (def.fuseFrom === 'impact') {
+            this._trigger(g);
+            this._removeLive(i);
+            continue;
+          }
           g.fuse = 0.05;
         }
 
@@ -1128,6 +1436,14 @@
         }
 
         const landReady = def.fuseFrom === 'land' && (g.settled || g.landed);
+        if (g.id === 'semtex' && g.fuse != null && g.fuse > 0 && (g.attach || g.settled)) {
+          g._beepAcc = (g._beepAcc || 0) + dt;
+          const interval = 0.16 + Math.max(0, g.fuse) * 0.14;
+          if (g._beepAcc >= interval) {
+            g._beepAcc = 0;
+            if (VF.Audio) VF.Audio.play('semtex_beep');
+          }
+        }
         if (def.fuseFrom === 'throw' || (def.fuseFrom === 'stick' && (g.attach || g.settled)) || landReady) {
           g.fuse -= dt;
           if (g.fuse <= 0) {
@@ -1222,6 +1538,13 @@
           g.x = ox;
           g.y = oy;
           g.z = oz;
+          const now = performance.now();
+          if (!g._bounceAt || now - g._bounceAt > 85) {
+            g._bounceAt = now;
+            if (VF.Audio && VF.Audio.playAt) {
+              VF.Audio.playAt('nade_bounce', g.x, g.y, g.z, { volMul: 0.55, hear: 40 });
+            }
+          }
           continue;
         }
 
@@ -1252,7 +1575,7 @@
             g.z = hit.z;
             this._settleNade(g, def);
             g.fuse = def.fuseTime;
-            if (VF.Audio) VF.Audio.play('c4_plant');
+            if (VF.Audio) VF.Audio.play('semtex_stick');
             return;
           }
           const rest = def.restitution != null ? def.restitution : PHYS.restitution;
@@ -1284,6 +1607,18 @@
             else if (g.vy < 0) g.vy = Math.abs(g.vy) * rest;
           }
           const spd = Math.sqrt(g.vx * g.vx + g.vy * g.vy + g.vz * g.vz);
+          if (impact > 1.15) {
+            const now = performance.now();
+            if (!g._bounceAt || now - g._bounceAt > 85) {
+              g._bounceAt = now;
+              const vol = Math.min(1, 0.28 + impact * 0.1);
+              if (VF.Audio && VF.Audio.playAt) {
+                VF.Audio.playAt('nade_bounce', g.x, g.y, g.z, { volMul: vol, hear: 52 });
+              } else if (VF.Audio) {
+                VF.Audio.play('nade_bounce', { volMul: vol });
+              }
+            }
+          }
           if (def.fuseFrom === 'land' && !g.landed) {
             g.landed = true;
             g.fuse = def.fuseTime;
@@ -1324,7 +1659,7 @@
         g._offY = actor.y - p.y;
         g._offZ = actor.z - p.z;
       }
-      if (VF.Audio) VF.Audio.play('c4_plant');
+      if (VF.Audio) VF.Audio.play('semtex_stick');
     },
 
     _followAttach: function (g) {
@@ -1381,7 +1716,7 @@
 
     _explode: function (g, def) {
       const world = VF.game && VF.game.world;
-      if (VF.Audio) VF.Audio.play('explosion');
+      if (VF.Audio) VF.Audio.play(g.id === 'semtex' ? 'semtex' : 'explosion');
       this._blastFx(g.x, g.y, g.z, def);
       this._breakBlocks(g.x, g.y, g.z, def.outerRadius, def.breakChance);
       if (world && world.deformTerrainCircle) {
@@ -1569,7 +1904,7 @@
         if (VF.UI && VF.UI.toast) VF.UI.toast('燃烧瓶入水熄灭');
         return;
       }
-      if (VF.Audio) VF.Audio.play('explosion');
+      if (VF.Audio) VF.Audio.play('molotov');
       const gy = groundY(world, g.x, g.y, g.z);
       const mesh = this._makeFireMesh(g.x, gy, g.z, def.fireRadius, world);
       VF.game.scene.add(mesh);
@@ -1594,61 +1929,150 @@
     _makeFireMesh: function (x, y, z, r, world) {
       const root = new THREE.Group();
       root.frustumCulled = false;
-      const blobGeo = new THREE.SphereGeometry(1, 10, 8);
+      let seq = 0;
 
-      const glow = new THREE.Mesh(new THREE.CircleGeometry(r * 1.08, 28), fxMat(0xffaa22, 0.28, true));
-      glow.rotation.x = -Math.PI / 2;
-      glow.position.y = 0.03;
-      root.add(glow);
+      const matHot = makeVoxelMat({
+        color: 0xffb43a,
+        opacity: 1,
+        emi: 0.34,
+        pixel: 5,
+        fogAmt: 0.06,
+        opaque: true,
+        toneMapped: false,
+      });
+      const matMid = makeVoxelMat({
+        color: 0xf9600f,
+        opacity: 1,
+        emi: 0.2,
+        pixel: 5,
+        fogAmt: 0.06,
+        opaque: true,
+        toneMapped: false,
+      });
+      const matDim = makeVoxelMat({
+        color: 0xc7300a,
+        opacity: 1,
+        emi: 0.1,
+        pixel: 4.5,
+        fogAmt: 0.08,
+        opaque: true,
+        toneMapped: false,
+      });
+      const matChar = makeVoxelMat({
+        color: 0x30231e,
+        opacity: 1,
+        emi: 0.04,
+        pixel: 4,
+        fogAmt: 0.12,
+        opaque: true,
+      });
+      const matSmoke = makeVoxelMat({
+        color: 0x555c64,
+        opacity: 0.2,
+        emi: 0,
+        pixel: 3.2,
+        fogAmt: 0.02,
+        soft: true,
+        toneMapped: false,
+        cloudY0: y + 1.4,
+        cloudH: 3.2,
+      });
+      root.userData.fxMats = [matHot, matMid, matDim, matChar, matSmoke];
 
-      const addBlob = (lx, ly, lz, sc, color, op, additive, kind) => {
-        if (world && isSolid(world, x + lx, y + ly, z + lz)) return;
-        const mesh = new THREE.Mesh(blobGeo, fxMat(color, op, additive));
-        mesh.scale.setScalar(sc);
-        mesh.position.set(lx, ly, lz);
-        mesh.userData.kind = kind;
-        mesh.userData.phase = Math.random() * 6.283;
-        mesh.userData.spin = 0.6 + Math.random() * 1.4;
-        mesh.userData.baseY = ly;
-        mesh.userData.baseX = lx;
-        mesh.userData.baseZ = lz;
-        mesh.userData.baseScale = sc;
-        mesh.userData.baseOp = op;
-        mesh.renderOrder = kind === 'ember' ? 6 : kind === 'fire' ? 5 : 3;
-        root.add(mesh);
+      const rnd = (lo, hi) => lo + Math.random() * (hi - lo);
+      const TAU = Math.PI * 2;
+      const can = (lx, ly, lz) => !(world && isSolid(world, x + lx, y + Math.max(ly, 0.4), z + lz));
+      const put = (lx, ly, lz, sx, sy, sz, mat, kind) => {
+        if (!can(lx, ly, lz)) return null;
+        const m = addVoxel(root, mat, lx, ly, lz, sx, sy, sz, {
+          kind: kind,
+          d: Math.hypot(lx, lz),
+          phase: Math.random() * TAU,
+          spin: 0.55 + Math.random() * 1.4,
+          key: 'f' + seq++,
+        });
+        if (m) m.rotation.y = Math.random() * TAU;
+        return m;
       };
 
-      const ring = (n, r0, r1, y0, y1, s0, s1, color, op, additive, kind) => {
-        for (let i = 0; i < n; i++) {
-          const a = (i / n) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
-          const rr = r0 + Math.random() * (r1 - r0);
-          addBlob(
-            Math.cos(a) * rr,
-            y0 + Math.random() * (y1 - y0),
-            Math.sin(a) * rr,
-            s0 + Math.random() * (s1 - s0),
-            color,
-            op,
-            additive,
-            kind
-          );
+      // One continuous burn scar: tiles sit on a jittered grid but are wider
+      // than the spacing, so they weld into a single pool instead of reading as
+      // separate patches. The outline comes from low-frequency waves and the
+      // embers from low-frequency blotches, never per-tile randomness.
+      const s1 = Math.random() * TAU;
+      const s2 = Math.random() * TAU;
+      const s3 = Math.random() * TAU;
+      const edgeAt = (a) =>
+        r * (0.9 + 0.1 * Math.sin(a * 3 + s1) + 0.07 * Math.sin(a * 5 + s2) + 0.05 * Math.sin(a * 8 + s3));
+      const gstep = 0.46;
+      const gn = Math.ceil(r / gstep) + 1;
+      for (let ix = -gn; ix <= gn; ix++) {
+        for (let iz = -gn; iz <= gn; iz++) {
+          const lx = ix * gstep + rnd(-0.07, 0.07);
+          const lz = iz * gstep + rnd(-0.07, 0.07);
+          const d = Math.hypot(lx, lz);
+          if (d > edgeAt(Math.atan2(lz, lx))) continue;
+          const blot =
+            Math.sin(lx * 1.6 + s1) + Math.sin(lz * 1.9 + s2) + Math.sin((lx + lz) * 1.1 + s3) - (d / r) * 1.2;
+          const mat = blot > 1.05 ? matHot : blot > 0.05 ? matMid : matChar;
+          // Distinct tops per layer (plus jitter) so overlapping tiles never
+          // end up coplanar and z-fight.
+          const h = (mat === matHot ? 0.2 : mat === matMid ? 0.155 : 0.11) + Math.random() * 0.03;
+          put(lx, h * 0.5, lz, gstep * 1.55, h, gstep * 1.55, mat, 'ground');
         }
-      };
+      }
 
-      // Ground fire carpet: dense yellow core → orange mid → thinner rim
-      ring(10, 0.0, r * 0.28, 0.22, 0.85, 0.62, 0.95, 0xfff04a, 0.88, true, 'fire');
-      ring(8, 0.05, r * 0.22, 0.45, 1.15, 0.5, 0.78, 0xffee66, 0.8, true, 'fire');
-      ring(16, r * 0.28, r * 0.68, 0.18, 0.75, 0.48, 0.78, 0xff8818, 0.78, true, 'fire');
-      ring(14, r * 0.62, r * 0.98, 0.14, 0.52, 0.38, 0.62, 0xff5510, 0.62, true, 'fire');
+      // Flame tongues: stacked cubes tapering upward, gaps between them so the
+      // silhouette reads as separate flames instead of one wall.
+      for (let i = 0; i < 30; i++) {
+        const a = Math.random() * TAU;
+        const rr = Math.sqrt(Math.random()) * r * 0.95;
+        const near = Math.max(0, 1 - rr / r);
+        const total = rnd(0.5, 0.95) + near * rnd(0.45, 1.35);
+        const segs = 2 + Math.floor(Math.random() * 3);
+        let cx = Math.cos(a) * rr;
+        let cz = Math.sin(a) * rr;
+        let base = 0.02;
+        let w = rnd(0.3, 0.52) * (0.8 + near * 0.5);
+        for (let s = 0; s < segs; s++) {
+          const t = s / segs;
+          const segH = (total / segs) * rnd(0.75, 1.3);
+          const mat = t < 0.3 ? matHot : t < 0.68 ? matMid : matDim;
+          put(cx, base + segH * 0.5, cz, w, segH, w * rnd(0.75, 1.1), mat, 'flame');
+          base += segH * rnd(0.78, 0.96);
+          w *= rnd(0.56, 0.8);
+          cx += rnd(-0.14, 0.14);
+          cz += rnd(-0.14, 0.14);
+        }
+      }
 
-      // Light haze only — must not wall off soldiers or the camera.
-      ring(6, r * 0.15, r * 0.45, 0.9, 1.6, 0.45, 0.7, 0x6a6e68, 0.16, false, 'plume');
-      ring(5, r * 0.12, r * 0.4, 1.5, 2.4, 0.4, 0.62, 0x7a7e78, 0.12, false, 'plume');
-      ring(4, r * 0.08, r * 0.32, 2.2, 3.1, 0.35, 0.52, 0x8a8e88, 0.09, false, 'plume');
+      // Thin smoke drifting off the pool, kept clear of the flames themselves.
+      for (let i = 0; i < 18; i++) {
+        const a = Math.random() * TAU;
+        const rr = Math.random() * r * 0.7;
+        const s = rnd(1.1, 2.1);
+        put(
+          Math.cos(a) * rr,
+          rnd(2.1, 3.9),
+          Math.sin(a) * rr,
+          s,
+          s * rnd(0.7, 1.05),
+          s * rnd(0.85, 1.15),
+          matSmoke,
+          'plume'
+        );
+      }
+      for (let i = 0; i < 22; i++) {
+        const a = Math.random() * TAU;
+        const rr = Math.random() * r * 0.9;
+        put(Math.cos(a) * rr, rnd(0.4, 1.6), Math.sin(a) * rr, 0.1, 0.1, 0.1, matHot, 'ember');
+      }
 
-      // Embers in the fire→smoke transition
-      ring(18, r * 0.1, r * 0.8, 0.55, 2.2, 0.1, 0.16, 0xff6622, 0.95, true, 'ember');
-
+      const light = new THREE.PointLight(0xff6a1c, 3.4, 15, 1.4);
+      light.position.set(0, 0.95, 0);
+      root.add(light);
+      root.userData.light = light;
+      root.userData.lightBase = 3.4;
       root.position.set(x, y, z);
       return root;
     },
@@ -1661,10 +2085,9 @@
       const cz = g.z;
       const maxR = def.effectRadius || 5;
       const colH = 3.4;
-      const cells = fillSmokeCloud(world, cx, cy, cz, maxR);
-      const mesh = this._makeSmokeMesh(cx, cy, cz, gy, cells, maxR);
+      const mesh = this._makeSmokeMesh(cx, gy, cz, maxR, world);
       VF.game.scene.add(mesh);
-      if (VF.Audio) VF.Audio.play('c4_plant');
+      if (VF.Audio) VF.Audio.play('smoke');
       const expand = def.expandTime;
       const stable = def.areaDuration;
       const fade = def.fadeTime;
@@ -1683,34 +2106,206 @@
         fadeLeft: fade,
         age: 0,
         phase: 'expand',
-        cells: cells,
+        cells: null,
         mesh: mesh,
       });
     },
 
-    _makeSmokeMesh: function (cx, cy, cz, gy, cells, maxR) {
+    /**
+     * One merged mesh of grid-aligned cubes. The occupied cells come from a
+     * noise-carved dome, so the outline is cauliflower-lumpy rather than round,
+     * and only the faces that touch an empty cell are emitted.
+     */
+    _makeSmokeMesh: function (cx, gy, cz, maxR, world) {
       const root = new THREE.Group();
       root.frustumCulled = false;
-      const geo = new THREE.SphereGeometry(1.55, 12, 10);
-      for (let i = 0; i < cells.length; i++) {
-        const c = cells[i];
-        const dark = i % 3 === 0;
-        const puff = new THREE.Mesh(geo, fxMat(dark ? 0x2a322f : 0x4a5650, 0.72, false));
-        puff.position.set(c.x - cx, c.y - cy, c.z - cz);
-        puff.userData.d = c.d;
-        puff.userData.baseOp = dark ? 0.8 : 0.62;
-        puff.userData.baseScale = 0.92 + (i % 5) * 0.04;
-        puff.visible = false;
-        puff.renderOrder = 4;
-        root.add(puff);
+      const cell = 0.44;
+      const colH = 3.6;
+      const mat = makeSmokeVoxelMat({ color: 0x60646b, y0: gy, h: colH });
+      // Deliberately not in fxMats: this material has no uOpacity/uEmi, so it
+      // must not go through tickVoxelMats. _updateZones drives it directly.
+      root.userData.smokeMat = mat;
+      root.userData.smokeH = colH;
+
+      const seed = Math.random() * 977;
+      const h3 = (x, y, z) => {
+        const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed) * 43758.5453;
+        return s - Math.floor(s);
+      };
+      const vn = (x, y, z) => {
+        const xi = Math.floor(x);
+        const yi = Math.floor(y);
+        const zi = Math.floor(z);
+        const xf = x - xi;
+        const yf = y - yi;
+        const zf = z - zi;
+        const u = xf * xf * (3 - 2 * xf);
+        const v = yf * yf * (3 - 2 * yf);
+        const w = zf * zf * (3 - 2 * zf);
+        const mix2 = (a, b, t) => a + (b - a) * t;
+        const y0 = mix2(
+          mix2(h3(xi, yi, zi), h3(xi + 1, yi, zi), u),
+          mix2(h3(xi, yi + 1, zi), h3(xi + 1, yi + 1, zi), u),
+          v
+        );
+        const y1 = mix2(
+          mix2(h3(xi, yi, zi + 1), h3(xi + 1, yi, zi + 1), u),
+          mix2(h3(xi, yi + 1, zi + 1), h3(xi + 1, yi + 1, zi + 1), u),
+          v
+        );
+        return mix2(y0, y1, w);
+      };
+      const lumps = (x, y, z) =>
+        vn(x * 0.62, y * 0.62, z * 0.62) * 0.56 +
+        vn(x * 1.35, y * 1.35, z * 1.35) * 0.29 +
+        vn(x * 2.7, y * 2.7, z * 2.7) * 0.15;
+
+      const nx = Math.ceil(maxR / cell) + 1;
+      const ny = Math.ceil(colH / cell);
+      const span = nx * 2 + 1;
+      const solid = new Uint8Array(span * span * ny);
+      const idx = (ix, iy, iz) => (iy * span + (ix + nx)) * span + (iz + nx);
+      const yc = colH * 0.5;
+      for (let iy = 0; iy < ny; iy++) {
+        const ly = (iy + 0.5) * cell;
+        for (let ix = -nx; ix <= nx; ix++) {
+          for (let iz = -nx; iz <= nx; iz++) {
+            const lx = ix * cell;
+            const lz = iz * cell;
+            const hr = Math.hypot(lx, lz) / maxR;
+            // Flat-bottomed dome, not an ellipsoid: the lower half has to be a
+            // full disc or the cloud thins out exactly at eye level, where a
+            // gap both looks wrong and lets players see through the cover.
+            const vr = Math.max(0, ly - yc) / (colH * 0.55);
+            const q = Math.hypot(hr, vr);
+            const edge = 1.02 + (lumps(lx, ly, lz) - 0.5) * 0.48;
+            if (q >= edge) continue;
+            if (world && isSolid(world, cx + lx, gy + ly, cz + lz)) continue;
+            solid[idx(ix, iy, iz)] = 1;
+          }
+        }
       }
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.93, 1.02, 48), fxMat(0xd0e0dc, 0.7, false));
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.y = gy - cy + 0.05;
-      ring.userData.ring = true;
-      ring.scale.setScalar(0.5);
-      root.add(ring);
-      root.position.set(cx, cy, cz);
+
+      const inRange = (ix, iy, iz) =>
+        iy >= 0 && iy < ny && ix >= -nx && ix <= nx && iz >= -nx && iz <= nx;
+      const solidAt = (ix, iy, iz) => (inRange(ix, iy, iz) ? solid[idx(ix, iy, iz)] : 0);
+      // Close pinholes. The cloud is only a few cells thick near its top, so
+      // the noise punches straight through it; each hole is a peephole onto the
+      // bright sky, and enough of them average the whole cloud out to pale grey.
+      const NB6 = [
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+      ];
+      for (let pass = 0; pass < 2; pass++) {
+        const add = [];
+        for (let iy = 0; iy < ny; iy++) {
+          for (let ix = -nx; ix <= nx; ix++) {
+            for (let iz = -nx; iz <= nx; iz++) {
+              if (solid[idx(ix, iy, iz)]) continue;
+              let nb = 0;
+              for (let d = 0; d < 6; d++) {
+                const o = NB6[d];
+                nb += solidAt(ix + o[0], iy + o[1], iz + o[2]);
+              }
+              if (nb >= 4) add.push(ix, iy, iz);
+            }
+          }
+        }
+        for (let a = 0; a < add.length; a += 3) solid[idx(add[a], add[a + 1], add[a + 2])] = 1;
+      }
+
+      const pos = [];
+      const nor = [];
+      const cens = [];
+      const dists = [];
+      const rims = [];
+      const seeds = [];
+      // Face basis picked so that u × v == the face normal, which makes the
+      // two triangles below wind counter-clockwise seen from outside.
+      const DIRS = [
+        { n: [1, 0, 0], u: [0, 1, 0], v: [0, 0, 1] },
+        { n: [-1, 0, 0], u: [0, 0, 1], v: [0, 1, 0] },
+        { n: [0, 1, 0], u: [0, 0, 1], v: [1, 0, 0] },
+        { n: [0, -1, 0], u: [1, 0, 0], v: [0, 0, 1] },
+        { n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0] },
+        { n: [0, 0, -1], u: [0, 1, 0], v: [1, 0, 0] },
+      ];
+      const at = (ix, iy, iz) => {
+        if (iy < 0 || iy >= ny || ix < -nx || ix > nx || iz < -nx || iz > nx) return 0;
+        return solid[idx(ix, iy, iz)];
+      };
+      // Slightly oversized cubes so neighbours overlap and no seam of
+      // background can show between them.
+      const hh = cell * 0.53;
+      for (let iy = 0; iy < ny; iy++) {
+        for (let ix = -nx; ix <= nx; ix++) {
+          for (let iz = -nx; iz <= nx; iz++) {
+            const k = idx(ix, iy, iz);
+            if (!solid[k]) continue;
+            const ccx = ix * cell;
+            const ccy = (iy + 0.5) * cell;
+            const ccz = iz * cell;
+            const dist = Math.hypot(ccx, ccz);
+            const cq = h3(ix * 3.1, iy * 5.7, iz * 2.3);
+            // Only loosely attached cells get dithered. A cell on a flat wall
+            // keeps five neighbours and stays solid, so the body of the cloud
+            // never lets the background bleed through; the lumps sticking out
+            // of the silhouette are the ones that break up into pixels.
+            let nb = 0;
+            for (let d = 0; d < 6; d++) {
+              const n = DIRS[d].n;
+              nb += at(ix + n[0], iy + n[1], iz + n[2]);
+            }
+            const cr = Math.min(1, Math.max(0, (4 - nb) / 3));
+            for (let d = 0; d < 6; d++) {
+              const dir = DIRS[d];
+              const n = dir.n;
+              if (at(ix + n[0], iy + n[1], iz + n[2])) continue;
+              const u = dir.u;
+              const v = dir.v;
+              const fx = ccx + n[0] * hh;
+              const fy = ccy + n[1] * hh;
+              const fz = ccz + n[2] * hh;
+              const corner = (su, sv) => [
+                fx + u[0] * hh * su + v[0] * hh * sv,
+                fy + u[1] * hh * su + v[1] * hh * sv,
+                fz + u[2] * hh * su + v[2] * hh * sv,
+              ];
+              const c0 = corner(-1, -1);
+              const c1 = corner(1, -1);
+              const c2 = corner(1, 1);
+              const c3 = corner(-1, 1);
+              const tri = [c0, c1, c2, c0, c2, c3];
+              for (let t = 0; t < 6; t++) {
+                const c = tri[t];
+                pos.push(c[0], c[1], c[2]);
+                nor.push(n[0], n[1], n[2]);
+                cens.push(ccx, ccy, ccz);
+                dists.push(dist);
+                rims.push(cr);
+                seeds.push(cq);
+              }
+            }
+          }
+        }
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      geo.setAttribute('aCenter', new THREE.Float32BufferAttribute(cens, 3));
+      geo.setAttribute('aDist', new THREE.Float32BufferAttribute(dists, 1));
+      geo.setAttribute('aRim', new THREE.Float32BufferAttribute(rims, 1));
+      geo.setAttribute('aRnd', new THREE.Float32BufferAttribute(seeds, 1));
+      geo.userData.owned = true;
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.frustumCulled = false;
+      root.add(mesh);
+      root.position.set(cx, gy, cz);
       return root;
     },
 
@@ -1729,12 +2324,13 @@
             }
           }
           if (z.life <= 0) {
-            if (z.mesh && z.mesh.parent) z.mesh.parent.remove(z.mesh);
+            disposeZoneMesh(z.mesh);
             state.zones.splice(i, 1);
           }
           continue;
         }
         if (z.kind === 'fire') {
+          z.age = (z.age || 0) + dt;
           z.acc += dt;
           while (z.acc >= z.tick) {
             z.acc -= z.tick;
@@ -1742,30 +2338,57 @@
           }
           if (z.mesh && z.mesh.children) {
             const t = performance.now() * 0.001;
-            const fade = Math.max(0.25, Math.min(1, z.life / 1.4));
+            // Catches alight from the middle outward, then burns back inward.
+            const lit = Math.min(1, z.age / 0.55);
+            const left = Math.min(1, Math.max(0, z.life) / 1.5);
+            const fade = Math.min(lit, left);
+            const rLit = z.radius * lit * 1.12;
+            const rLeft = z.radius * left * 1.12;
+            tickVoxelMats(z.mesh.userData && z.mesh.userData.fxMats, fade, t);
+            const lightRef = z.mesh.userData && z.mesh.userData.light;
+            if (lightRef) lightRef.intensity = (z.mesh.userData.lightBase || 3.4) * fade;
             for (let c = 0; c < z.mesh.children.length; c++) {
               const ch = z.mesh.children[c];
               const u = ch.userData;
               if (u.phase == null) continue;
+              const d = u.d || 0;
+              const grow = Math.max(0, Math.min(1, (rLit - d) / 0.85));
+              const burn = Math.max(0, Math.min(1, (rLeft - d) / 0.85));
+              const app = Math.min(grow, burn);
+              if (app <= 0.002) {
+                ch.visible = false;
+                continue;
+              }
+              ch.visible = true;
               const w = t * (u.spin || 1) + u.phase;
-              if (u.kind === 'fire') {
-                const flick = 0.86 + Math.sin(w * 5.2) * 0.14;
-                ch.scale.setScalar((u.baseScale || 0.6) * flick);
-                ch.position.y = u.baseY + Math.sin(w * 3.1) * 0.08;
-                if (ch.material) ch.material.opacity = (u.baseOp || 0.7) * fade * flick;
+              const bx = u.baseScaleX || 0.4;
+              const by = u.baseScaleY || bx;
+              const bz = u.baseScaleZ || bx;
+              if (u.kind === 'flame') {
+                const tall = (0.78 + Math.sin(w * 6.6) * 0.16 + Math.sin(w * 11.7) * 0.07) * app;
+                const wob = (0.92 + Math.sin(w * 5.1) * 0.08) * (0.4 + app * 0.6);
+                ch.position.x = (u.baseX || 0) + Math.sin(w * 2.6) * 0.055;
+                ch.position.y = (u.baseY || 0) * tall + Math.sin(w * 3.3) * 0.05 * app;
+                ch.position.z = (u.baseZ || 0) + Math.cos(w * 2.2) * 0.055;
+                ch.scale.set(bx * wob, by * tall, bz * wob);
+              } else if (u.kind === 'ground') {
+                // Only the thickness grows, so neighbouring tiles stay welded.
+                const th = (0.85 + Math.sin(w * 3.6) * 0.15) * app;
+                ch.position.y = (u.baseY || 0) * th;
+                ch.scale.set(bx, by * th, bz);
               } else if (u.kind === 'plume') {
-                ch.position.y = u.baseY + Math.sin(w * 0.7) * 0.18 + (1 - fade) * 0.35;
-                ch.position.x = (u.baseX || 0) + Math.sin(w * 0.45) * 0.12;
-                ch.position.z = (u.baseZ || 0) + Math.cos(w * 0.4) * 0.12;
-                const puff = 0.94 + Math.sin(w * 1.1) * 0.08;
-                ch.scale.setScalar((u.baseScale || 0.8) * puff);
-                if (ch.material) ch.material.opacity = (u.baseOp || 0.5) * fade;
+                const ps = 0.55 + app * 0.45;
+                ch.position.x = (u.baseX || 0) + Math.sin(w * 0.45) * 0.1;
+                ch.position.y = (u.baseY || 0) + Math.sin(w * 0.7) * 0.14 + (1 - fade) * 0.35;
+                ch.position.z = (u.baseZ || 0) + Math.cos(w * 0.4) * 0.1;
+                ch.scale.set(bx * ps, by * ps, bz * ps);
               } else if (u.kind === 'ember') {
-                const lift = (w * 0.35) % 1.6;
-                ch.position.y = u.baseY + lift;
-                ch.position.x = (u.baseX || 0) + Math.sin(w * 2.2) * 0.18;
-                ch.position.z = (u.baseZ || 0) + Math.cos(w * 1.8) * 0.18;
-                if (ch.material) ch.material.opacity = (u.baseOp || 0.9) * fade * (0.45 + 0.55 * Math.sin(w * 8));
+                const lift = (w * 0.32) % 1.5;
+                ch.position.x = (u.baseX || 0) + Math.sin(w * 1.8) * 0.16;
+                ch.position.y = (u.baseY || 0) + lift;
+                ch.position.z = (u.baseZ || 0) + Math.cos(w * 1.5) * 0.16;
+                const pulse = (0.45 + 0.55 * Math.max(0, Math.sin(w * 6.5))) * app;
+                ch.scale.set(bx * pulse, by * pulse, bz * pulse);
               }
             }
           }
@@ -1789,33 +2412,30 @@
             z.radius = z.maxR * Math.max(0, z.fadeLeft / fade);
           }
           const dens = smokeDensity(z);
-          if (z.mesh && z.mesh.children) {
-            for (let c = 0; c < z.mesh.children.length; c++) {
-              const ch = z.mesh.children[c];
-              if (ch.userData.ring) {
-                ch.scale.setScalar(Math.max(0.45, z.radius));
-                if (ch.material) ch.material.opacity = 0.22 + dens * 0.45;
-                continue;
-              }
-              const show = (ch.userData.d || 0) <= z.radius + 0.85;
-              ch.visible = show;
-              if (show && ch.material) {
-                const base = ch.userData.baseOp != null ? ch.userData.baseOp : 0.7;
-                const grow = 0.82 + dens * 0.28;
-                const s0 = ch.userData.baseScale != null ? ch.userData.baseScale : 1;
-                ch.scale.setScalar(s0 * grow);
-                ch.material.opacity = base * (0.35 + 0.65 * dens);
-              }
-            }
+          const smokeMat = z.mesh && z.mesh.userData && z.mesh.userData.smokeMat;
+          if (smokeMat) {
+            const u = smokeMat.uniforms;
+            u.uTime.value = performance.now() * 0.001;
+            u.uDens.value = dens;
+            // Same +1 m clearance as the solid pass, but the fill value is
+            // height so the front walks up the cloud instead of out from the
+            // axis. Held at the top during fade so Bayer dither is what
+            // dissolves it, not the mesh sinking.
+            const smokeH = z.mesh.userData.smokeH || 3.6;
+            const t = z.phase === 'expand'
+              ? Math.min(1, z.age / Math.max(0.001, expand))
+              : 1;
+            u.uFill.value = t * (smokeH + 2.0);
+            syncVoxelFog(smokeMat);
           }
           if (z.age >= total) {
-            if (z.mesh && z.mesh.parent) z.mesh.parent.remove(z.mesh);
+            disposeZoneMesh(z.mesh);
             state.zones.splice(i, 1);
             continue;
           }
         }
         if (z.kind !== 'smoke' && z.life <= 0) {
-          if (z.mesh && z.mesh.parent) z.mesh.parent.remove(z.mesh);
+          disposeZoneMesh(z.mesh);
           state.zones.splice(i, 1);
         }
       }
@@ -1859,8 +2479,7 @@
 
     _clearZones: function () {
       for (let i = 0; i < state.zones.length; i++) {
-        const z = state.zones[i];
-        if (z.mesh && z.mesh.parent) z.mesh.parent.remove(z.mesh);
+        disposeZoneMesh(state.zones[i].mesh);
       }
       state.zones.length = 0;
     },
@@ -1895,6 +2514,7 @@
           state.flashMax = Math.max(state.flashMax, def.maxBlind);
           state.flashT = Math.max(state.flashT, dur);
           if (pl.addShake) pl.addShake(0.28);
+          if (VF.Audio) VF.Audio.play('flash_ring');
         }
       }
       const ai = VF.game && VF.game.ai;
@@ -1911,7 +2531,7 @@
           if (dur > 0) u.throwBlind = Math.max(u.throwBlind || 0, dur);
         }
       }
-      if (VF.Audio) VF.Audio.play('hit_heavy');
+      if (VF.Audio) VF.Audio.play('flashbang');
     },
 
     _flashOn: function (target, isPlayer, g, def, world) {
@@ -1992,7 +2612,7 @@
           affect(p, false, u);
         }
       }
-      if (VF.Audio) VF.Audio.play('hit');
+      if (VF.Audio) VF.Audio.play('stun');
     },
 
     _tickAiStatus: function (dt) {
@@ -2202,7 +2822,7 @@
         if (ey < y0 - 0.2 || ey > y1) continue;
         inside = Math.max(inside, dens * (1 - horiz / Math.max(0.001, r) * 0.35));
       }
-      el.style.opacity = String(inside * 0.88);
+      el.style.opacity = String(inside * 0.95);
     },
 
     _syncSmokeMarkers: function () {

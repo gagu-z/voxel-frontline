@@ -542,7 +542,7 @@
         const po = qi * 12;
         const io = qi * 6;
         const vi = qi * 4;
-        const shade = 0.72 + 0.28 * Math.max(0, ny);
+        const shade = 0.86 + 0.14 * Math.max(0, ny);
         for (let v = 0; v < 4; v++) {
           positions[po + v * 3] = verts[v * 3];
           positions[po + v * 3 + 1] = verts[v * 3 + 1];

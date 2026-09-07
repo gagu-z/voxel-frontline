@@ -182,7 +182,7 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(1);
     renderer.shadowMap.enabled = false;
-    renderer.setClearColor(0x1a1008);
+    renderer.setClearColor(0x7eb6e4);
     document.body.prepend(renderer.domElement);
     game.renderer = renderer;
     renderer.domElement.addEventListener(
@@ -199,36 +199,45 @@
         try {
           renderer.setSize(window.innerWidth, window.innerHeight);
           renderer.setPixelRatio(1);
-          renderer.setClearColor(0x1a1008);
+          renderer.setClearColor(0x7eb6e4);
         } catch (_) {}
       },
       false
     );
 
-    // Scene — dystopian sunset atmosphere (no sky sphere — avoids black ball artifacts)
+    // Scene — daylight blue sky (no sky sphere — avoids black ball artifacts)
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xc45a28);
-    // Softer fog — keep silhouette readable at bridge distances
-    scene.fog = new THREE.Fog(0xb85a32, 100, 300);
+    scene.background = new THREE.Color(0x7eb6e4);
+    scene.fog = new THREE.Fog(0x7eb6e4, 220, 920);
     game.scene = scene;
 
     // Camera — must be in the scene so FPS viewmodel (camera children) render
-    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.08, 360);
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.08, 1100);
     scene.add(camera);
     game.camera = camera;
 
-    // Lighting — warm sunset (fewer lights = better FPS)
-    const ambient = new THREE.AmbientLight(0xffc9a0, 0.7);
-    scene.add(ambient);
+    // Sky dome + sun + ambient, all driven by VF.RenderConfig (see
+    // render-scene.js). Falls back to fixed noon daylight if that fails.
+    game.renderScene = VF.createRenderScene ? VF.createRenderScene(scene) : null;
+    if (!game.renderScene) {
+      const ambient = new THREE.AmbientLight(0xd4e2f2, 0.62);
+      scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xff8c4a, 0.95);
-    sun.position.set(-60, 45, 25);
-    sun.castShadow = false;
-    scene.add(sun);
+      const sun = new THREE.DirectionalLight(0xfff2cc, 1.05);
+      sun.position.set(-60, 45, 25);
+      sun.castShadow = false;
+      scene.add(sun);
 
-    const fill = new THREE.DirectionalLight(0x4466aa, 0.18);
-    fill.position.set(40, 20, -30);
-    scene.add(fill);
+      const fill = new THREE.DirectionalLight(0x5a8ac8, 0.28);
+      fill.position.set(40, 20, -30);
+      scene.add(fill);
+    }
+
+    // Post-processing pipeline (Composer + Pass system; falls back to direct
+    // renderer.render when RenderConfig.enabled is false or init fails).
+    if (VF.createRenderPipeline) {
+      game.pipeline = VF.createRenderPipeline(renderer, window.innerWidth, window.innerHeight);
+    }
 
     // Voxel world
     game.world = new VF.VoxelWorld(scene);
@@ -446,6 +455,14 @@
     if (VF.Range) VF.Range.open();
   }
 
+  function wipeMatchFx() {
+    if (VF.Audio && VF.Audio.clearPending) VF.Audio.clearPending();
+    if (game.ai && game.ai._clearDeathFx) game.ai._clearDeathFx();
+    if (game.weapons && game.weapons.clearWorldFx) game.weapons.clearWorldFx();
+    if (game.bases && game.bases.clearWorldFx) game.bases.clearWorldFx();
+    if (VF.SdField && VF.SdField._killDetonation) VF.SdField._killDetonation();
+  }
+
   function returnToHub() {
     game.teamLocked = false;
     game.lockedTeam = null;
@@ -476,6 +493,8 @@
     }
     if (VF.Range && VF.Range.isOpen) VF.Range.close(true);
     if (game.ai && game.ai._clearUnits) game.ai._clearUnits();
+    wipeMatchFx();
+    if (VF.Audio && VF.Audio.setInMatch) VF.Audio.setInMatch(false);
     const cover = document.getElementById('start-overlay');
     if (cover) cover.classList.add('hidden');
     if (VF.Hub && VF.Hub.hide) VF.Hub.hide();
@@ -690,6 +709,7 @@
   }
 
   function prepareMatchMap() {
+    wipeMatchFx();
     let seed;
     if (game.mode === 'pvp' && VF.Pvp && VF.Pvp.matchSeed != null) {
       seed = VF.Pvp.matchSeed >>> 0;
@@ -932,6 +952,8 @@
       game.world.setPlayerTeam(game.pvp.team);
     }
     if (!game.world._playerTeam || !game.world.getSelectedSpawn()) return;
+    wipeMatchFx();
+    if (VF.Audio && VF.Audio.setInMatch) VF.Audio.setInMatch(true);
     // First spawn confirm locks faction for this match (incl. death redeploy)
     game.teamLocked = true;
     game.lockedTeam = game.world._playerTeam;
@@ -1151,6 +1173,7 @@
     if (VF.GgUi && VF.GgUi.leave) VF.GgUi.leave();
     if (VF.Throwables && VF.Throwables.stop) VF.Throwables.stop();
     if (game.battlefieldEvents && game.battlefieldEvents.stop) game.battlefieldEvents.stop();
+    if (VF.Audio && VF.Audio.setInMatch) VF.Audio.setInMatch(false);
     if (game.mode === 'pvp' && VF.Pvp && VF.Pvp.leaveLobby) {
       VF.Pvp.leaveLobby();
       game.mode = 'pve';
@@ -1221,6 +1244,7 @@
     game.camera.aspect = window.innerWidth / window.innerHeight;
     game.camera.updateProjectionMatrix();
     game.renderer.setSize(window.innerWidth, window.innerHeight);
+    if (game.pipeline) game.pipeline.setSize(window.innerWidth, window.innerHeight);
     if (VF.Hub) VF.Hub.onResize();
   }
 
@@ -1386,7 +1410,13 @@
       }
     }
 
-    if (game.running && !VF.UI.isMenuOpen() && game.player && !game.player.dead) {
+    if (game.player && game.player.dead && !rangeOpen) {
+      try {
+        game.player._updateDeadCam(dt);
+      } catch (err) {
+        console.error('[VF] dead cam', err);
+      }
+    } else if (game.running && !VF.UI.isMenuOpen() && game.player && !game.player.dead) {
       try {
         game.player.update(dt);
       } catch (err) {
@@ -1501,7 +1531,14 @@
       VF.Hub.update(dt);
       VF.Hub.render();
     } else {
-      game.renderer.render(game.scene, game.camera);
+      // Sky/sun/ambient are scene objects — they must be pushed from config
+      // BEFORE the scene is drawn, whichever render path we then take.
+      if (game.renderScene) game.renderScene.sync();
+      if (VF.RenderConfig && VF.RenderConfig.enabled && game.pipeline) {
+        game.pipeline.render(game.scene, game.camera, dt);
+      } else {
+        game.renderer.render(game.scene, game.camera);
+      }
     }
   }
 

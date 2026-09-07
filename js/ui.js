@@ -565,6 +565,48 @@
       }
     },
 
+    /** Gray-white fallen-camera look. Does not touch HUD chrome. */
+    _setDeathWorldLook(on) {
+      const g = global.VF && global.VF.game;
+      const canvas = g && g.renderer && g.renderer.domElement;
+      const pipelineOn = !(global.VF.RenderConfig && global.VF.RenderConfig.enabled === false);
+      if (on) {
+        global.VF.RenderGameplay = {
+          colorGrade: {
+            enabled: true,
+            saturation: 0.07,
+            contrast: 1.16,
+            lift: -0.05,
+            gain: 0.9,
+          },
+          vignette: { enabled: true, intensity: 0.72, radius: 0.46, smoothness: 0.58 },
+          film: { enabled: true, grain: 0.048, aberration: 0.0032 },
+          fog: { enabled: true, near: 8, far: 110, color: '#c8c8cc' },
+          volumetricFog: {
+            density: 0.018,
+            color: '#c4c6c8',
+            maxDistance: 140,
+            sunStrength: 0.8,
+          },
+          lighting: {
+            sunIntensity: 0.42,
+            ambientIntensity: 0.4,
+            fillIntensity: 0.1,
+          },
+          sky: {
+            zenithColor: '#b4b6b8',
+            horizonColor: '#d0d2d4',
+            groundColor: '#3a3a3a',
+            sunIntensity: 0.25,
+            hdriIntensity: 0.28,
+          },
+        };
+      } else if (global.VF) {
+        global.VF.RenderGameplay = null;
+      }
+      if (canvas) canvas.classList.toggle('downed-world', !!on && !pipelineOn);
+    },
+
     /** @param {{autoRespawn?: boolean}} [opts] hides 重新部署 for timed respawns */
     showDeath(title, sub, flavor, opts) {
       if (this.els.deathSub) {
@@ -582,11 +624,13 @@
         if (h1) h1.textContent = title || '你已阵亡';
         this.els.deathOverlay.classList.remove('hidden');
       }
+      this._setDeathWorldLook(true);
       document.exitPointerLock && document.exitPointerLock();
     },
 
     hideDeath() {
       if (this.els.deathOverlay) this.els.deathOverlay.classList.add('hidden');
+      this._setDeathWorldLook(false);
     },
 
     setHotbarSlot(slotNum) {
@@ -667,13 +711,8 @@
     },
 
     /**
-     * Crosshair shot feedback.
-     * - 'fire': red solid 十 only (every shot)
-     * - 'hit' / 'hostile': red 十 + open × ticks (hostile unit hit only)
-     */
-    /**
      * Crosshair shot feedback with bloom → spring settle.
-     * - 'fire': red solid 十, spread then fall back
+     * - 'fire': default 十 scales (miss — no color change)
      * - 'hit' / 'hostile': red 十 + open × (hostile unit hit)
      * - 'kill': gold × overshoot + ring
      */

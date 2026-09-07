@@ -365,7 +365,12 @@
   };
 
   Player.prototype.getEyeHeight = function () {
-    return THREE.MathUtils.lerp(EYE_HEIGHT, EYE_CROUCH, this._crouchBlend || 0);
+    const stand = THREE.MathUtils.lerp(EYE_HEIGHT, EYE_CROUCH, this._crouchBlend || 0);
+    if (!this.dead) return stand;
+    const target = 0.34;
+    const b = this._deathBlend == null ? 1 : this._deathBlend;
+    const from = this._deathEyeFrom != null ? this._deathEyeFrom : stand;
+    return THREE.MathUtils.lerp(from, target, b);
   };
 
   Player.prototype.getBodyHeight = function () {
@@ -713,6 +718,7 @@
 
   Player.prototype.die = function (attacker) {
     if (this.dead) return;
+    const eyeFrom = this.getEyeHeight();
     this.dead = true;
     this.alive = false;
     this.health = 0;
@@ -778,6 +784,9 @@
     if (global.VF.Audio) {
       global.VF.Audio.play('death');
     }
+    this._deathEyeFrom = eyeFrom;
+    this._deathBlend = 0;
+    this._hideViewModels(true);
     if (global.VF.game) global.VF.game.running = false;
 
     // PVP: sync death to opponent (no longer ends the match)
@@ -832,6 +841,9 @@
   Player.prototype.respawn = function () {
     this.dead = false;
     this.alive = true;
+    this._deathBlend = 0;
+    this._deathEyeFrom = null;
+    this._hideViewModels(false);
     this.health = this.maxHealth || 100;
     this.armor = Math.min(this.maxArmor || 100, 50);
     this.velocity.set(0, 0, 0);
@@ -854,8 +866,33 @@
     }
   };
 
+  Player.prototype._hideViewModels = function (hide) {
+    const nodes = [this.viewModel, this._weaponViewModel, this.buildViewModel];
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i]) nodes[i].visible = !hide;
+    }
+  };
+
+  Player.prototype._updateDeadCam = function (dt) {
+    this._deathBlend = Math.min(1, (this._deathBlend || 0) + dt / 0.36);
+    this.aiming = false;
+    this._adsBlend = Math.max(0, (this._adsBlend || 0) - dt * 8);
+    this._hideViewModels(true);
+    this._updateViewPunch(dt);
+    this._syncCameraLook();
+    const eye = this.getEyePosition();
+    this.camera.position.set(eye.x, eye.y, eye.z);
+    if (this.camera.fov !== HIP_FOV) {
+      this.camera.fov = HIP_FOV;
+      this.camera.updateProjectionMatrix();
+    }
+  };
+
   Player.prototype.update = function (dt) {
-    if (this.dead) return;
+    if (this.dead) {
+      this._updateDeadCam(dt);
+      return;
+    }
 
     if (this.spawnProtect > 0) {
       // 复活保护：站定即维持无敌；一旦移动/跳跃即刻取消（开火取消见 weapons.js）
@@ -870,6 +907,9 @@
 
     this._updateViewPunch(dt);
     this._syncCameraLook();
+
+    const frozen =
+      global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen();
 
     // Zipline: hold F to mount; F/Space to jump off after a short grace
     const fDown = !!this.keys['KeyF'];
@@ -892,7 +932,7 @@
         this.camera.updateProjectionMatrix();
         return;
       }
-    } else if (fDown && this._zipCool <= 0) {
+    } else if (!frozen && fDown && this._zipCool <= 0) {
       const ok = this._tryStartZipline();
       if (!ok) this._zipCool = 0.18;
     }
@@ -900,11 +940,12 @@
     this._zipJumpWasDown = jumpDown;
 
     // Movement input
-    const forward = this.keys['KeyW'] ? 1 : 0;
-    const back = this.keys['KeyS'] ? 1 : 0;
-    const left = this.keys['KeyA'] ? 1 : 0;
-    const right = this.keys['KeyD'] ? 1 : 0;
+    const forward = frozen ? 0 : this.keys['KeyW'] ? 1 : 0;
+    const back = frozen ? 0 : this.keys['KeyS'] ? 1 : 0;
+    const left = frozen ? 0 : this.keys['KeyA'] ? 1 : 0;
+    const right = frozen ? 0 : this.keys['KeyD'] ? 1 : 0;
     const wantCrouch =
+      !frozen &&
       !!(this.keys['ControlLeft'] || this.keys['ControlRight']) &&
       this.onGround &&
       !this.zipRide;
@@ -916,6 +957,7 @@
     this._crouchBlend += ((this.crouching ? 1 : 0) - this._crouchBlend) * Math.min(1, dt * 14);
 
     const sprint =
+      !frozen &&
       !this.crouching &&
       (this.keys['ShiftLeft'] || this.keys['ShiftRight']);
 
@@ -965,7 +1007,7 @@
 
     // Jump + gravity (jump exits crouch when headroom allows)
     if (!dashing) {
-      if (this.onGround && this.keys['Space']) {
+      if (this.onGround && this.keys['Space'] && !frozen) {
         if (this.crouching) {
           if (this._canStand()) this.crouching = false;
         }

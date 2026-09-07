@@ -280,6 +280,9 @@
   Skills.prototype._canDash = function () {
     if (!this.player || !this.player.locked || this.player.dead) return false;
     if (global.VF.UI && global.VF.UI.isMenuOpen && global.VF.UI.isMenuOpen()) return false;
+    if (global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen()) {
+      return false;
+    }
     if (this.player.zipRide) return false;
     if (this.dash) return false;
     return true;
@@ -288,6 +291,9 @@
   Skills.prototype._canUseVanguard = function () {
     if (!this.player || !this.player.locked || this.player.dead) return false;
     if (global.VF.UI && global.VF.UI.isMenuOpen && global.VF.UI.isMenuOpen()) return false;
+    if (global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen()) {
+      return false;
+    }
     if (this.player.classId !== VANGUARD.id) return false;
     return true;
   };
@@ -295,6 +301,9 @@
   Skills.prototype._canUseMedic = function () {
     if (!this.player || !this.player.locked || this.player.dead) return false;
     if (global.VF.UI && global.VF.UI.isMenuOpen && global.VF.UI.isMenuOpen()) return false;
+    if (global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen()) {
+      return false;
+    }
     if (this.player.classId !== MEDIC.id) return false;
     return true;
   };
@@ -302,6 +311,9 @@
   Skills.prototype._canUseGhost = function () {
     if (!this.player || !this.player.locked || this.player.dead) return false;
     if (global.VF.UI && global.VF.UI.isMenuOpen && global.VF.UI.isMenuOpen()) return false;
+    if (global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen()) {
+      return false;
+    }
     if (this.player.classId !== GHOST.id) return false;
     return true;
   };
@@ -518,6 +530,9 @@
   Skills.prototype._canUseJuggernaut = function () {
     if (!this.player || !this.player.locked || this.player.dead) return false;
     if (global.VF.UI && global.VF.UI.isMenuOpen && global.VF.UI.isMenuOpen()) return false;
+    if (global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen()) {
+      return false;
+    }
     if (this.player.classId !== JUGGERNAUT.id) return false;
     return true;
   };
@@ -792,6 +807,9 @@
   Skills.prototype._canUseRaider = function () {
     if (!this.player || !this.player.locked || this.player.dead) return false;
     if (global.VF.UI && global.VF.UI.isMenuOpen && global.VF.UI.isMenuOpen()) return false;
+    if (global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen()) {
+      return false;
+    }
     if (this.player.classId !== RAIDER.id) return false;
     return true;
   };
@@ -2494,6 +2512,9 @@
   Skills.prototype._canUseEngineer = function () {
     if (!this.player || !this.player.locked || this.player.dead) return false;
     if (global.VF.UI && global.VF.UI.isMenuOpen && global.VF.UI.isMenuOpen()) return false;
+    if (global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen()) {
+      return false;
+    }
     if (this.player.classId !== ENGINEER.id) return false;
     return true;
   };
@@ -2851,7 +2872,11 @@
         color: 0xffaa44,
       });
     }
-    if (global.VF.Audio) global.VF.Audio.play('shoot_ar');
+    if (global.VF.Audio && global.VF.Audio.playAt) {
+      global.VF.Audio.playAt('shoot_ar', from.x, from.y, from.z);
+    } else if (global.VF.Audio) {
+      global.VF.Audio.play('shoot_ar');
+    }
 
     const dmg = ENGINEER.turretDmg;
     if (target.kind === 'ai' && target.unit) {

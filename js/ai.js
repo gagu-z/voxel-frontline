@@ -888,6 +888,23 @@
     return out;
   };
 
+  AI.prototype._clearDeathFx = function () {
+    while (this._deathChunks && this._deathChunks.length) {
+      this._releaseDeathChunk(this._deathChunks.pop());
+    }
+    const drop = function (arr) {
+      if (!arr) return;
+      for (let i = 0; i < arr.length; i++) {
+        const m = arr[i] && arr[i].mesh;
+        if (m && m.parent) m.parent.remove(m);
+        if (m && m.material) m.material.dispose();
+      }
+      arr.length = 0;
+    };
+    drop(this._deathRings);
+    drop(this._deathFlashes);
+  };
+
   AI.prototype._clearUnits = function () {
     const all = this.blue.concat(this.red);
     for (let i = 0; i < all.length; i++) {
@@ -897,6 +914,7 @@
     this.red = [];
     this.allies = [];
     this.enemies = [];
+    this._clearDeathFx();
   };
 
   AI.prototype.applyPlayerTeam = function () {
@@ -2063,6 +2081,12 @@
         bright: true,
         lifeMul: 1.3,
       });
+    }
+
+    const A = global.VF.Audio;
+    if (A && A.playAt) {
+      const shot = unit.type === 'heavy' ? 'shoot_sg' : unit.type === 'ranged' ? 'shoot_sr' : 'shoot_ar';
+      A.playAt(shot, from.x, from.y, from.z);
     }
 
     if (!didHit) return;
@@ -3253,6 +3277,9 @@
   AI.prototype.update = function (dt) {
     this._updateDeathChunks(dt);
     if (!this.enabled || !this._armiesSpawned) return;
+    if (global.VF.GameModes && global.VF.GameModes.prepFrozen && global.VF.GameModes.prepFrozen()) {
+      return;
+    }
 
     this.waveTimer += dt;
     const stepDt = Math.min(dt, 0.05);

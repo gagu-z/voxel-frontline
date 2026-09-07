@@ -23,19 +23,19 @@
 
   /** Placeable tower blocks: id, name, voxel type, color, hits, unit coin price */
   const TOWER_BLOCKS = [
-    { id: 'grass', name: '草地', block: 1, color: 0x3d6b2e, hits: 1, unit: 2 },
-    { id: 'dirt', name: '泥土', block: 2, color: 0x6b4a2e, hits: 1, unit: 2 },
-    { id: 'rubble', name: '废墟', block: 9, color: 0x5a5048, hits: 1, unit: 2 },
-    { id: 'stone', name: '石块', block: 3, color: 0x6e7278, hits: 2, unit: 3 },
-    { id: 'road', name: '路面', block: 7, color: 0x2a2c30, hits: 2, unit: 3 },
-    { id: 'asphalt', name: '沥青', block: 14, color: 0x222428, hits: 2, unit: 3 },
-    { id: 'wood', name: '木板', block: 12, color: 0x5a4030, hits: 1, unit: 3 },
-    { id: 'plaster', name: '灰泥', block: 11, color: 0xd8d2c4, hits: 1, unit: 3 },
-    { id: 'brick', name: '砖块', block: 10, color: 0x8a3a2a, hits: 2, unit: 4 },
-    { id: 'rust', name: '锈铁', block: 5, color: 0x8b4518, hits: 2, unit: 4 },
-    { id: 'glass', name: '玻璃', block: 13, color: 0x6a9aaa, hits: 1, unit: 4 },
-    { id: 'concrete', name: '混凝土', block: 4, color: 0x9a968e, hits: 3, unit: 5 },
-    { id: 'metal', name: '金属', block: 6, color: 0x4a5560, hits: 5, unit: 8 },
+    { id: 'grass', name: '草地', block: 1, color: 0x5a8a42, hits: 1, unit: 2 },
+    { id: 'dirt', name: '泥土', block: 2, color: 0x8a7354, hits: 1, unit: 2 },
+    { id: 'rubble', name: '废墟', block: 9, color: 0x7a7266, hits: 1, unit: 2 },
+    { id: 'stone', name: '石块', block: 3, color: 0x8e8f8c, hits: 2, unit: 3 },
+    { id: 'road', name: '路面', block: 7, color: 0x535860, hits: 2, unit: 3 },
+    { id: 'asphalt', name: '沥青', block: 14, color: 0x4a4e56, hits: 2, unit: 3 },
+    { id: 'wood', name: '木板', block: 12, color: 0x7a5844, hits: 1, unit: 3 },
+    { id: 'plaster', name: '灰泥', block: 11, color: 0xe6e0d4, hits: 1, unit: 3 },
+    { id: 'brick', name: '砖块', block: 10, color: 0xb45a44, hits: 2, unit: 4 },
+    { id: 'rust', name: '锈铁', block: 5, color: 0xa85a2e, hits: 2, unit: 4 },
+    { id: 'glass', name: '玻璃', block: 13, color: 0x8ec4d8, hits: 1, unit: 4 },
+    { id: 'concrete', name: '混凝土', block: 4, color: 0xb8b3a8, hits: 3, unit: 5 },
+    { id: 'metal', name: '金属', block: 6, color: 0x66758a, hits: 5, unit: 8 },
   ];
 
   /** Catalog: id → shop item */

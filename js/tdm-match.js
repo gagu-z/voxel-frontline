@@ -293,9 +293,11 @@
         // Delayed so the milestone reads as a flourish after the kill sting,
         // not as a thicker version of it
         const pitch = 1 + row.streak * 0.05;
-        setTimeout(function () {
-          if (VF.Audio) VF.Audio.play('kill', { pitch: pitch, streak: row.streak });
-        }, 160);
+        if (VF.Audio && VF.Audio.later) {
+          VF.Audio.later(160, function () {
+            VF.Audio.play('kill', { pitch: pitch, streak: row.streak });
+          });
+        }
       }
       if (VF.TdmUi && VF.TdmUi.onStreak) VF.TdmUi.onStreak(row, label);
     },

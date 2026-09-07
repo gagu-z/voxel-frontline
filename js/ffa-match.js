@@ -234,9 +234,11 @@
       if (row.isPlayer) {
         if (VF.UI && VF.UI.toast) VF.UI.toast(label);
         const pitch = 1 + row.streak * 0.05;
-        setTimeout(function () {
-          if (VF.Audio) VF.Audio.play('kill', { pitch: pitch, streak: row.streak });
-        }, 160);
+        if (VF.Audio && VF.Audio.later) {
+          VF.Audio.later(160, function () {
+            VF.Audio.play('kill', { pitch: pitch, streak: row.streak });
+          });
+        }
       }
       if (VF.FfaUi && VF.FfaUi.onStreak) VF.FfaUi.onStreak(row, label);
     },

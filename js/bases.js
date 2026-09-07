@@ -1070,7 +1070,9 @@
       core.visible = false;
     }
     const self = this;
-    setTimeout(function () {
+    if (this._coreBoomTimer) clearTimeout(this._coreBoomTimer);
+    this._coreBoomTimer = setTimeout(function () {
+      self._coreBoomTimer = 0;
       self._spawnExplosion(p);
     }, 280);
   };
@@ -1236,7 +1238,43 @@
     }
 
     const start = performance.now();
+    const self = this;
+    if (this._boomKill) {
+      try {
+        this._boomKill();
+      } catch (_) {}
+      this._boomKill = null;
+    }
+    let dead = false;
+    const kill = function () {
+      if (dead) return;
+      dead = true;
+      if (self._boomRaf) {
+        cancelAnimationFrame(self._boomRaf);
+        self._boomRaf = 0;
+      }
+      scene.remove(light);
+      scene.remove(flash);
+      flash.geometry.dispose();
+      flash.material.dispose();
+      scene.remove(fire);
+      fire.geometry.dispose();
+      fire.material.dispose();
+      scene.remove(ring);
+      ring.geometry.dispose();
+      ring.material.dispose();
+      for (let i = 0; i < parts.length; i++) {
+        scene.remove(parts[i].mesh);
+        parts[i].geo.dispose();
+        parts[i].mat.dispose();
+      }
+      parts.length = 0;
+      if (self._boomKill === kill) self._boomKill = null;
+    };
+    this._boomKill = kill;
+
     const tick = function () {
+      if (dead) return;
       const dt = 0.016;
       const age = (performance.now() - start) / 1000;
       const u = Math.min(1, age / 0.55);
@@ -1263,26 +1301,12 @@
       }
       light.intensity *= 0.9;
       if (parts.length > 0 && performance.now() - start < 2800) {
-        requestAnimationFrame(tick);
+        self._boomRaf = requestAnimationFrame(tick);
       } else {
-        scene.remove(light);
-        scene.remove(flash);
-        flash.geometry.dispose();
-        flash.material.dispose();
-        scene.remove(fire);
-        fire.geometry.dispose();
-        fire.material.dispose();
-        scene.remove(ring);
-        ring.geometry.dispose();
-        ring.material.dispose();
-        for (let i = 0; i < parts.length; i++) {
-          scene.remove(parts[i].mesh);
-          parts[i].geo.dispose();
-          parts[i].mat.dispose();
-        }
+        kill();
       }
     };
-    requestAnimationFrame(tick);
+    this._boomRaf = requestAnimationFrame(tick);
   };
 
   Bases.prototype._hideAllCaptureHuds = function () {
@@ -1384,7 +1408,41 @@
    * meshes hidden, per-frame capture / core work skipped, damage refused.
    * Keeps TDM from needing "if not deathmatch" guards scattered through here.
    */
+  Bases.prototype.clearWorldFx = function () {
+    if (this._coreBoomTimer) {
+      clearTimeout(this._coreBoomTimer);
+      this._coreBoomTimer = 0;
+    }
+    if (this._boomRaf) {
+      cancelAnimationFrame(this._boomRaf);
+      this._boomRaf = 0;
+    }
+    if (this._boomKill) {
+      const fn = this._boomKill;
+      this._boomKill = null;
+      try {
+        fn();
+      } catch (_) {}
+    }
+    if (this._hitFx && this._hitFx.length) {
+      for (let i = 0; i < this._hitFx.length; i++) {
+        const fx = this._hitFx[i];
+        const debris = fx && fx.debris;
+        if (!debris) continue;
+        for (let s = 0; s < debris.length; s++) {
+          const sp = debris[s];
+          if (!sp || !sp.mesh) continue;
+          this.scene.remove(sp.mesh);
+          if (sp.mesh.geometry) sp.mesh.geometry.dispose();
+          if (sp.mesh.material) sp.mesh.material.dispose();
+        }
+      }
+      this._hitFx.length = 0;
+    }
+  };
+
   Bases.prototype.detach = function () {
+    this.clearWorldFx();
     this.attached = false;
     this._clearSpawnCrystals();
     if (this.allyBase) this.allyBase.visible = false;

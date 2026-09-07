@@ -777,7 +777,11 @@ canvas {
 }
 
 #death-overlay {
-  background: rgba(18, 4, 8, 0.72);
+  background: transparent;
+}
+
+canvas.downed-world {
+  filter: grayscale(0.88) contrast(1.12);
 }
 
 #victory-overlay {
@@ -2617,16 +2621,30 @@ canvas {
   opacity: 0;
 }
 
-#crosshair.fire .ch,
-#crosshair.fire .ch-dot,
 #crosshair.hit .ch,
 #crosshair.hit .ch-dot {
   visibility: hidden;
 }
 
-#crosshair.fire .hit-mi,
 #crosshair.hit .hit-mi {
   opacity: 1;
+}
+
+/* Miss: keep the idle 十, punch its scale. Do not swap in the red marker. */
+#crosshair.fire {
+  animation: ch-fire-scale 0.16s cubic-bezier(0.22, 1.4, 0.36, 1) both;
+}
+
+@keyframes ch-fire-scale {
+  0% {
+    transform: translate(-50%, -50%) scale(1.42);
+  }
+  55% {
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
 /* Only on unit hit: show the four diagonal ticks */
@@ -3196,9 +3214,9 @@ canvas {
   opacity: 0;
   background: radial-gradient(
     ellipse at center,
-    rgba(70, 74, 68, 0.35) 0%,
-    rgba(48, 52, 48, 0.78) 55%,
-    rgba(28, 30, 28, 0.92) 100%
+    rgba(84, 92, 104, 0.7) 0%,
+    rgba(62, 69, 80, 0.92) 55%,
+    rgba(46, 52, 62, 0.97) 100%
   );
 }
 

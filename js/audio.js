@@ -11,11 +11,16 @@
     music: null,
     enabled: true,
     unlocked: false,
+    inMatch: false,
     _ambientNodes: null,
     _stepCd: 0,
     _lastLanded: true,
     _uiClickCd: 0,
     _rumbleCd: 3,
+    _stamp: 0,
+    _queue: [],
+    _volMul: 1,
+    _worldShotAt: 0,
 
     init() {
       try {
@@ -39,7 +44,7 @@
       if (!ctx) return Promise.resolve(false);
       const start = () => {
         this.unlocked = true;
-        if (this.enabled) this._startMusic();
+        if (this.enabled && !this.inMatch) this._startMusic();
         this._flushQueue();
         return true;
       };
@@ -82,7 +87,7 @@
       try {
         localStorage.setItem('vf_audio_muted', this.enabled ? '0' : '1');
       } catch (e) { /* ignore */ }
-      if (this.enabled) this._startMusic();
+      if (this.enabled && !this.inMatch) this._startMusic();
       else this._stopMusic();
       this._syncMuteUi();
     },
@@ -100,26 +105,95 @@
       btn.title = this.enabled ? '静音' : '开启声音';
     },
 
+    /**
+     * Drop queued / delayed combat SFX so a new match never replays the last
+     * death, kill, or explosion from the previous one.
+     */
+    clearPending() {
+      this._queue = [];
+      this._stamp = (this._stamp || 0) + 1;
+    },
+
+    /** Menu / hub may loop a theme; a live match is SFX-only. */
+    setInMatch(on) {
+      this.inMatch = !!on;
+      if (this.inMatch) this._stopMusic();
+      else if (this.enabled && this.unlocked) this._startMusic();
+    },
+
+    /** setTimeout that no-ops after clearPending(). */
+    later(ms, fn) {
+      const stamp = this._stamp || 0;
+      const vol = this._volMul == null ? 1 : this._volMul;
+      const self = this;
+      return setTimeout(function () {
+        if ((self._stamp || 0) !== stamp || !self.enabled) return;
+        const prev = self._volMul;
+        self._volMul = vol;
+        fn();
+        self._volMul = prev;
+      }, ms);
+    },
+
     play(name, opts) {
       if (!this.enabled) return;
       const ctx = this._ensure();
       if (!ctx) return;
+      const stamp = this._stamp || 0;
+      const volMul = opts && opts.volMul != null ? opts.volMul : 1;
       const run = () => {
+        if ((this._stamp || 0) !== stamp) return;
+        this._volMul = volMul;
         const fn = SOUNDS[name];
         if (fn) fn(this, opts || {});
+        this._volMul = 1;
       };
       // Browsers drop scheduled nodes while suspended — wait for resume.
+      // Only bank UI beeps; combat SFX dumped on the first click would replay
+      // leftover deaths/explosions from the previous match.
       if (ctx.state === 'suspended') {
-        this._queue = this._queue || [];
-        if (this._queue.length < 24) this._queue.push(run);
+        if (name === 'ui' || name === 'confirm') {
+          this._queue = this._queue || [];
+          if (this._queue.length < 24) this._queue.push(run);
+        }
         ctx.resume().then(() => {
           this.unlocked = true;
           this._flushQueue();
-          if (this.enabled) this._startMusic();
+          if (this.enabled && !this.inMatch) this._startMusic();
         }).catch(function () {});
         return;
       }
       run();
+    },
+
+    /**
+     * Combat SFX at a world point, faded by distance to the local player.
+     * Close shots stay loud; far ones thin out instead of vanishing or stacking
+     * into a wall of noise.
+     */
+    playAt(name, x, y, z, opts) {
+      if (!this.enabled) return;
+      opts = opts || {};
+      const hear = opts.hear != null ? opts.hear : 82;
+      const g = global.VF && global.VF.game;
+      const player = g && g.player;
+      let volMul = 1;
+      if (player && player.object) {
+        const p = player.object.position;
+        const dx = x - p.x;
+        const dy = (y || 0) - (p.y || 0);
+        const dz = z - p.z;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (d > hear) return;
+        volMul = Math.max(0.08, 1 / (1 + d * 0.042));
+      }
+      if (name.indexOf('shoot_') === 0) {
+        const now = performance.now();
+        if (now - (this._worldShotAt || 0) < 24 && volMul < 0.42) return;
+        this._worldShotAt = now;
+      }
+      const extra = opts.volMul != null ? opts.volMul : 1;
+      this.play(name, Object.assign({}, opts, { volMul: volMul * extra }));
     },
 
     _flushQueue() {
@@ -136,13 +210,6 @@
       if (!this.enabled || !player || player.dead) return;
       this._stepCd = Math.max(0, this._stepCd - dt);
       this._uiClickCd = Math.max(0, this._uiClickCd - dt);
-      this._rumbleCd = Math.max(0, (this._rumbleCd || 0) - dt);
-
-      // Soft battlefield bed only when no theme track is looping
-      if (!this._musicSrc && this._rumbleCd <= 0) {
-        this.play('distant_rumble');
-        this._rumbleCd = 2.2 + Math.random() * 3.2;
-      }
 
       const moving =
         player.onGround &&
@@ -187,9 +254,10 @@
       const ctx = this.ctx;
       const osc = ctx.createOscillator();
       const g = ctx.createGain();
+      const mul = this._volMul == null ? 1 : this._volMul;
       osc.type = type || 'square';
       osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      this._env(g, ctx.currentTime, 0.005, vol || 0.2, dur * 0.25, (vol || 0.2) * 0.35, dur * 0.7);
+      this._env(g, ctx.currentTime, 0.005, (vol || 0.2) * mul, dur * 0.25, (vol || 0.2) * mul * 0.35, dur * 0.7);
       osc.connect(g);
       g.connect(dest || this.sfx);
       osc.start();
@@ -208,7 +276,8 @@
       lp.type = 'lowpass';
       lp.frequency.value = lpFreq != null ? lpFreq : 4000;
       const g = ctx.createGain();
-      this._env(g, ctx.currentTime, 0.001, vol || 0.3, dur * 0.2, (vol || 0.3) * 0.2, dur * 0.75);
+      const mul = this._volMul == null ? 1 : this._volMul;
+      this._env(g, ctx.currentTime, 0.001, (vol || 0.3) * mul, dur * 0.2, (vol || 0.3) * mul * 0.2, dur * 0.75);
       src.connect(hp);
       hp.connect(lp);
       lp.connect(g);
@@ -217,8 +286,40 @@
       src.stop(ctx.currentTime + dur + 0.05);
     },
 
+    /** Short air throw whoosh (COD grenade foley). */
+    whoosh(dur, vol) {
+      const ctx = this.ctx;
+      const mul = this._volMul == null ? 1 : this._volMul;
+      const t0 = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = this._noiseBuffer(Math.max(dur + 0.05, 0.1));
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(1400, t0);
+      bp.frequency.exponentialRampToValueAtTime(280, t0 + dur);
+      bp.Q.value = 0.85;
+      const g = ctx.createGain();
+      this._env(g, t0, 0.008, (vol || 0.2) * mul, dur * 0.25, (vol || 0.2) * mul * 0.15, dur * 0.7);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(this.sfx);
+      src.start();
+      src.stop(t0 + dur + 0.04);
+    },
+
+    /** Decaying modal ping — grenade body rattle on bounce. */
+    metalHit(vol) {
+      const v = vol || 0.2;
+      const jitter = 0.97 + Math.random() * 0.06;
+      const freqs = [640, 980, 1420, 1960, 2680];
+      for (let i = 0; i < freqs.length; i++) {
+        this.tone(freqs[i] * jitter, 0.055 + i * 0.018, i < 2 ? 'triangle' : 'sine', v * (0.14 - i * 0.02));
+      }
+      this.noiseBurst(0.035, v * 0.28, 1600, 9000);
+    },
+
     _startMusic() {
-      if (!this.enabled) return;
+      if (!this.enabled || this.inMatch) return;
       const ctx = this._ensure();
       if (!ctx) return;
       this._stopAmbient();
@@ -247,7 +348,6 @@
       const tryLoad = (i) => {
         if (i >= paths.length) {
           this._musicLoading = false;
-          this._startAmbient(); // soft pad fallback only if no file
           return;
         }
         fetch(paths[i])
@@ -374,10 +474,9 @@
       A.tone(120, 0.18, 'sawtooth', 0.3);
       A.tone(55, 0.28, 'triangle', 0.18);
       // Distant crack tail
-      setTimeout(() => {
-        if (!A.enabled) return;
+      A.later(40, function () {
         A.noiseBurst(0.12, 0.12, 1500, 6000);
-      }, 40);
+      });
     },
     empty(A) {
       A.tone(220, 0.04, 'square', 0.08);
@@ -415,10 +514,9 @@
       A.tone(1760 * p, 0.08, 'triangle', 0.14);
       A.tone(90 * Math.min(1.15, p), 0.1, 'triangle', 0.18);
       A.noiseBurst(0.08, 0.2, 400, 6000);
-      setTimeout(function () {
-        if (!A.enabled) return;
+      A.later(35, function () {
         A.tone(1480 * p, 0.05, 'triangle', 0.12);
-      }, 35);
+      });
     },
     impact(A) {
       A.noiseBurst(0.07, 0.2, 200, 2800);
@@ -516,18 +614,16 @@
     },
     victory(A) {
       [523, 659, 784, 1046].forEach((f, i) => {
-        setTimeout(() => {
-          if (!A.enabled) return;
+        A.later(i * 110, function () {
           A.tone(f, 0.18, 'triangle', 0.12);
-        }, i * 110);
+        });
       });
     },
     defeat(A) {
       [392, 330, 262].forEach((f, i) => {
-        setTimeout(() => {
-          if (!A.enabled) return;
+        A.later(i * 140, function () {
           A.tone(f, 0.22, 'sawtooth', 0.1);
-        }, i * 140);
+        });
       });
     },
     dash(A) {
@@ -564,24 +660,113 @@
       A.tone(880, 0.08, 'sine', 0.12);
       A.tone(220, 0.18, 'sawtooth', 0.16);
       A.tone(110, 0.22, 'triangle', 0.12);
-      setTimeout(function () {
-        if (!A.enabled) return;
+      A.later(40, function () {
         A.noiseBurst(0.12, 0.18, 400, 5000);
-      }, 40);
+      });
     },
     c4_plant(A) {
       A.tone(200, 0.06, 'square', 0.12);
       A.noiseBurst(0.05, 0.14, 600, 3000);
       A.tone(140, 0.08, 'triangle', 0.08);
     },
+    /** COD-style pin + spoon: scrape then a bright metal click. */
+    nade_pin(A) {
+      A.noiseBurst(0.055, 0.16, 2200, 9000);
+      A.tone(2100, 0.03, 'square', 0.1);
+      A.later(42, function () {
+        A.tone(1450, 0.028, 'triangle', 0.14);
+        A.tone(780, 0.04, 'square', 0.08);
+        A.noiseBurst(0.03, 0.12, 1800, 7000);
+      });
+    },
+    nade_throw(A) {
+      A.whoosh(0.14, 0.22);
+      A.noiseBurst(0.06, 0.1, 400, 2500);
+    },
+    nade_bounce(A) {
+      A.metalHit(0.55);
+    },
+    semtex_stick(A) {
+      A.noiseBurst(0.06, 0.28, 200, 1800);
+      A.tone(90, 0.08, 'triangle', 0.16);
+      A.tone(240, 0.05, 'sine', 0.08);
+    },
+    semtex_beep(A) {
+      A.tone(1180, 0.045, 'square', 0.12);
+      A.tone(1760, 0.03, 'sine', 0.06);
+    },
+    semtex(A) {
+      // Tighter than a frag: crack + punch, less dirt rain
+      A.noiseBurst(0.06, 0.95, 200, 5000);
+      A.noiseBurst(0.28, 0.7, 30, 900);
+      A.tone(62, 0.16, 'sawtooth', 0.48);
+      A.tone(34, 0.4, 'triangle', 0.28);
+      A.later(50, function () {
+        A.noiseBurst(0.14, 0.28, 80, 1600);
+      });
+    },
     explosion(A) {
-      A.noiseBurst(0.35, 0.55, 40, 2200);
-      A.tone(70, 0.28, 'sawtooth', 0.32);
-      A.tone(40, 0.4, 'triangle', 0.22);
-      setTimeout(function () {
-        if (!A.enabled) return;
-        A.noiseBurst(0.2, 0.22, 80, 1600);
-      }, 50);
+      // Frag: transient crack, chest punch, then debris (COD mix puts debris up)
+      A.noiseBurst(0.045, 1.0, 600, 9000);
+      A.noiseBurst(0.12, 0.85, 80, 2200);
+      A.tone(52, 0.18, 'sawtooth', 0.55);
+      A.tone(28, 0.5, 'triangle', 0.32);
+      A.tone(140, 0.08, 'square', 0.18);
+      A.later(40, function () {
+        A.noiseBurst(0.16, 0.42, 400, 4500);
+        A.noiseBurst(0.22, 0.28, 1200, 8000);
+      });
+      A.later(110, function () {
+        A.noiseBurst(0.2, 0.18, 600, 3500);
+        A.tone(40, 0.22, 'triangle', 0.1);
+      });
+    },
+    molotov(A) {
+      // Bottle smash (bright shards) then petrol ignition whoosh
+      A.noiseBurst(0.04, 0.55, 3200, 16000);
+      A.tone(2800, 0.03, 'square', 0.2);
+      A.tone(1950, 0.045, 'triangle', 0.16);
+      A.tone(4100 + Math.random() * 600, 0.025, 'square', 0.12);
+      A.tone(1250, 0.04, 'sine', 0.08);
+      A.later(32, function () {
+        A.whoosh(0.16, 0.28);
+        A.noiseBurst(0.12, 0.32, 500, 5500);
+        A.tone(240, 0.1, 'sawtooth', 0.12);
+      });
+    },
+    flashbang(A) {
+      // Little bass, lots of crack — then a brief ear ring lives on flash_ring
+      A.noiseBurst(0.05, 0.85, 1500, 14000);
+      A.tone(2400, 0.04, 'square', 0.28);
+      A.tone(1350, 0.07, 'triangle', 0.16);
+      A.noiseBurst(0.1, 0.28, 400, 5000);
+    },
+    flash_ring(A) {
+      A.tone(3200, 0.55, 'sine', 0.1);
+      A.tone(3180, 0.7, 'sine', 0.06);
+      A.later(80, function () {
+        A.tone(1600, 0.4, 'sine', 0.04);
+      });
+    },
+    stun(A) {
+      // Concussion: body hit + flux, not a frag crack
+      A.noiseBurst(0.16, 0.72, 60, 900);
+      A.tone(48, 0.22, 'sawtooth', 0.42);
+      A.tone(26, 0.38, 'triangle', 0.3);
+      A.whoosh(0.2, 0.18);
+      A.later(50, function () {
+        A.noiseBurst(0.14, 0.28, 80, 1400);
+      });
+    },
+    smoke(A) {
+      A.noiseBurst(0.05, 0.32, 400, 2800);
+      A.tone(170, 0.05, 'triangle', 0.1);
+      A.later(30, function () {
+        A.noiseBurst(0.55, 0.22, 80, 1100);
+      });
+      A.later(90, function () {
+        A.noiseBurst(0.7, 0.14, 40, 700);
+      });
     },
   };
 
