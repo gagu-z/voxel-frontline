@@ -293,6 +293,10 @@
       if (!this.active || !(dt > 0)) return;
 
       if (this.matchOver) {
+        if (VF.WeaponInspect && VF.WeaponInspect.isActive && VF.WeaponInspect.isActive()) {
+          this._sync();
+          return;
+        }
         // Hold the final summary, then hand back to the lobby (as死斗 does).
         this.resultClock = Math.max(0, this.resultClock - dt);
         this._sync();

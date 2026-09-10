@@ -1,6 +1,6 @@
 /**
  * player.js — First-person controller + voxel soldier view-model
- * WASD · mouse look · jump · crouch (Ctrl) · ADS (RMB) · pointer lock
+ * WASD · mouse look · jump · crouch (C toggle / Ctrl hold / sprint+crouch slide) · ADS (RMB) · pointer lock
  */
 (function (global) {
   'use strict';
@@ -12,6 +12,9 @@
   const PLAYER_CROUCH_HEIGHT = 1.15;
   const MOVE_SPEED = 8.5;
   const CROUCH_SPEED_MULT = 0.48;
+  const SLIDE_MULT = 1.35;
+  const SLIDE_DUR = 0.45;
+  const SLIDE_COOL = 0.28;
   const SPRINT_MULT = 1.42;
   const JUMP_VEL = 8.2;
   const GRAVITY = 22;
@@ -26,6 +29,177 @@
   function feelGroup(name) {
     const F = global.VF && global.VF.Feel;
     return (F && F[name]) || {};
+  }
+
+  /** Frame-rate independent exponential follow (doodleshooter `st`). */
+  function expSmooth(cur, target, rate, dt) {
+    if (!(dt > 0) || cur === target) return cur;
+    return cur + (target - cur) * (1 - Math.exp(-Math.max(0, rate) * dt));
+  }
+
+  /**
+   * Doodle can put the red-dot on the optical axis because its optic is a
+   * see-through window. Our voxel guns are solid boxes, so ADS is look-over:
+   * square the gun, park its TOP just under the HUD +, and pull it in so the
+   * receiver fills the lower frame the way doodle's shotgun does.
+   * 0.28 NDC left a dead band under the +; ~0.09 is a hair of air, not a gap.
+   */
+  const ADS_TOP_NDC = 0.09;
+  const ADS_PULL_Z = 0.16;
+  const ADS_NEAR_PAD = 0.15;
+  const _adsTmp = new THREE.Vector3();
+  const _adsWorld = new THREE.Vector3();
+  const _adsArmWrist = new THREE.Vector3();
+  const ADS_WRIST_R = new THREE.Vector3(0.01, -0.22, 0.04);
+  const ADS_WRIST_L = new THREE.Vector3(-0.01, -0.22, 0.05);
+
+  function adsPosFromHip(hip) {
+    const hx = hip && hip.x != null ? hip.x : 0.3;
+    const hy = hip && hip.y != null ? hip.y : -0.34;
+    const hz = hip && hip.z != null ? hip.z : -0.52;
+    return new THREE.Vector3(hx * 0.08, hy + 0.14, hz + ADS_PULL_Z);
+  }
+
+  function weaponIsSniper(weaponId) {
+    const d = global.VF.WEAPONS && weaponId && global.VF.WEAPONS[weaponId];
+    return !!(d && d.scope === 'sniper');
+  }
+
+  function findAdsSight(gunNode) {
+    let sight = null;
+    if (!gunNode) return null;
+    gunNode.traverse(function (o) {
+      if (sight || !o.isMesh || !o.material || !o.material.color || !o.material.color.getHex) return;
+      if (o.material.color.getHex() === 0xff4422) sight = o;
+    });
+    return sight;
+  }
+
+  function isViewHand(obj, gunNode) {
+    let p = obj;
+    while (p && p !== gunNode) {
+      const n = p.name || '';
+      if (n === 'ViewRightHand' || n === 'ViewLeftHand') return true;
+      p = p.parent;
+    }
+    return false;
+  }
+
+  /** Highest on-screen gun corner + camera-space X to centre (sight if any). */
+  function pickAdsScreen(camera, gunNode, sight) {
+    const tmp = _adsTmp;
+    const world = _adsWorld;
+    let topNdc = -Infinity;
+    let topCamY = 0;
+    let topCamZ = -0.5;
+    let minCamX = Infinity;
+    let maxCamX = -Infinity;
+    gunNode.traverse(function (o) {
+      if (!o.isMesh || !o.geometry || isViewHand(o, gunNode)) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      const bb = o.geometry.boundingBox;
+      for (let i = 0; i < 8; i++) {
+        tmp.set(
+          i & 1 ? bb.max.x : bb.min.x,
+          i & 2 ? bb.max.y : bb.min.y,
+          i & 4 ? bb.max.z : bb.min.z
+        );
+        o.localToWorld(tmp);
+        world.copy(tmp);
+        camera.worldToLocal(tmp);
+        // Stocks sit toward the camera; corners past the near plane explode NDC.
+        if (tmp.z > -0.12) continue;
+        minCamX = Math.min(minCamX, tmp.x);
+        maxCamX = Math.max(maxCamX, tmp.x);
+        const camY = tmp.y;
+        const camZ = tmp.z;
+        world.project(camera);
+        if (world.y > topNdc) {
+          topNdc = world.y;
+          topCamY = camY;
+          topCamZ = camZ;
+        }
+      }
+    });
+    let cx = (minCamX + maxCamX) * 0.5;
+    if (sight) {
+      sight.getWorldPosition(tmp);
+      camera.worldToLocal(tmp);
+      cx = tmp.x;
+    }
+    return {
+      ok: topNdc !== -Infinity && isFinite(cx),
+      cx: cx,
+      topNdc: topNdc,
+      topCamY: topCamY,
+      topCamZ: topCamZ,
+    };
+  }
+
+  function adsLookOverDeltaY(camera, st) {
+    const fov = ((camera && camera.fov) || HIP_FOV) * (Math.PI / 180);
+    const z = Math.max(0.12, -(st.topCamZ || 0.5));
+    const wantCamY = -ADS_TOP_NDC * z * Math.tan(fov * 0.5);
+    return wantCamY - st.topCamY;
+  }
+
+  function gunViewLocalMaxZ(viewModel, gunNode) {
+    let maxZ = -Infinity;
+    const tmp = _adsTmp;
+    gunNode.traverse(function (o) {
+      if (!o.isMesh || !o.geometry || isViewHand(o, gunNode)) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      const bb = o.geometry.boundingBox;
+      for (let i = 0; i < 8; i++) {
+        tmp.set(
+          i & 1 ? bb.max.x : bb.min.x,
+          i & 2 ? bb.max.y : bb.min.y,
+          i & 4 ? bb.max.z : bb.min.z
+        );
+        o.localToWorld(tmp);
+        viewModel.worldToLocal(tmp);
+        if (tmp.z > maxZ) maxZ = tmp.z;
+      }
+    });
+    return maxZ;
+  }
+
+  function adsSafeVmZ(hipZ, maxLocalZ) {
+    const pulled = hipZ + ADS_PULL_Z;
+    const safe = -ADS_NEAR_PAD - (isFinite(maxLocalZ) ? maxLocalZ : 0.4);
+    return Math.min(pulled, safe);
+  }
+
+  /** Bake a look-over rest pose: gun squared, top just under the +, X on the midline. */
+  function adsPosFromLookOver(viewModel, gunNode, hip, camera) {
+    const fallback = adsPosFromHip(hip);
+    if (!viewModel || !gunNode || !camera) return fallback;
+    const hipZ = hip && hip.z != null ? hip.z : -0.52;
+    const saved = {
+      px: viewModel.position.x,
+      py: viewModel.position.y,
+      pz: viewModel.position.z,
+      rx: viewModel.rotation.x,
+      ry: viewModel.rotation.y,
+      rz: viewModel.rotation.z,
+      gx: gunNode.rotation.x,
+      gy: gunNode.rotation.y,
+      gz: gunNode.rotation.z,
+    };
+    viewModel.rotation.set(0, 0, 0);
+    gunNode.rotation.set(0, 0, 0);
+    viewModel.updateMatrixWorld(true);
+    const adsZ = adsSafeVmZ(hipZ, gunViewLocalMaxZ(viewModel, gunNode));
+    viewModel.position.set(0, fallback.y, adsZ);
+    viewModel.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+    const st = pickAdsScreen(camera, gunNode, findAdsSight(gunNode));
+    viewModel.position.set(saved.px, saved.py, saved.pz);
+    viewModel.rotation.set(saved.rx, saved.ry, saved.rz);
+    gunNode.rotation.set(saved.gx, saved.gy, saved.gz);
+    viewModel.updateMatrixWorld(true);
+    if (!st.ok) return new THREE.Vector3(fallback.x, fallback.y, adsZ);
+    return new THREE.Vector3(-st.cx, fallback.y + adsLookOverDeltaY(camera, st), adsZ);
   }
 
   function Player(camera, world) {
@@ -51,7 +225,16 @@
     this.pitch = 0;
     this.yaw = 0;
     this.crouching = false;
+    this._crouchToggle = false;
     this._crouchBlend = 0;
+    this.slide = false;
+    this._slideT = 0;
+    this._slideDx = 0;
+    this._slideDz = 0;
+    this._slideCool = 0;
+    this._ctrlWas = false;
+    this._cWas = false;
+    this._shiftWas = false;
     this.zipRide = null;
     this._zipKeyWasDown = false;
     this._zipJumpWasDown = false;
@@ -63,33 +246,27 @@
 
     // First-person voxel soldier (shared palette with squad)
     this.classId = 'vanguard';
-    if (global.VF.Soldier) {
-      const vm = global.VF.Soldier.createViewModel(this.classId);
-      this.viewModel = vm.root;
-      this.gunNode = vm.gun;
-      this.muzzle = vm.muzzle;
-      this.muzzleFlash = vm.flash;
-      this.rightArm = vm.rightArm;
-      this.leftArm = vm.leftArm;
-      this._hipPos = vm.root.position.clone();
-      this._adsPos = new THREE.Vector3(0.08, -0.26, -0.4);
-    } else {
-      this.viewModel = this._createSoldierViewModel();
-    }
-    camera.add(this.viewModel);
-
-    this._weaponViewModel = this.viewModel;
-    this._weaponGunNode = this.gunNode;
-    this._weaponMuzzle = this.muzzle;
-    this._weaponFlash = this.muzzleFlash;
-    this._weaponHip = this._hipPos.clone();
-    this._weaponAds = this._adsPos.clone();
+    this.weaponId = 'ar';
     this._heldMode = 'weapon'; // 'weapon' | 'build'
     this.buildViewModel = null;
+    if (global.VF.Soldier) {
+      this._rebuildWeaponViewModel(this.classId, this.weaponId);
+    } else {
+      this.viewModel = this._createSoldierViewModel();
+      camera.add(this.viewModel);
+      this._weaponViewModel = this.viewModel;
+    }
 
     this._bobTime = 0;
     this._swayBlend = 0;
     this._adsBlend = 0;
+    this._adsFov = HIP_FOV;
+    this._lookDx = 0;
+    this._lookDy = 0;
+    this._lookSwayPos = new THREE.Vector3();
+    this._lookSwayRot = new THREE.Vector3();
+    this._camRoll = 0;
+    this._viewY = null;
     this._recoilKick = 0;
     this._recoilVel = 0;
     this._viewPunchPitch = 0;
@@ -104,6 +281,7 @@
     this._shake = 0;
     this._fovPunch = 0;
     this._vmBase = new THREE.Vector3();
+    this._equipT = 1;
     this.skillSpeedBuffTimer = 0;
     this.skillSpeedBuffMul = 1.2;
     this.stealthed = false;
@@ -112,17 +290,18 @@
     this._bindInput();
   }
 
-  /** Swap first-person arms / gun look to match selected class */
-  Player.prototype.applyClass = function (classId) {
-    if (!classId || !global.VF.Soldier) return;
-    this.classId = classId;
-    const wasBuild = this._heldMode === 'build';
+  /**
+   * Rebuild the first-person arms + gun. Each gun id has its own mesh, so this
+   * runs on class change and on every weapon swap.
+   */
+  Player.prototype._rebuildWeaponViewModel = function (classId, weaponId) {
+    if (!global.VF.Soldier) return;
     if (this._weaponViewModel && this._weaponViewModel.parent) {
       this._weaponViewModel.parent.remove(this._weaponViewModel);
     } else if (this.viewModel && this.viewModel.parent && this.viewModel !== this.buildViewModel) {
       this.viewModel.parent.remove(this.viewModel);
     }
-    const vm = global.VF.Soldier.createViewModel(classId);
+    const vm = global.VF.Soldier.createViewModel(classId, weaponId);
     this.viewModel = vm.root;
     this.gunNode = vm.gun;
     this.muzzle = vm.muzzle;
@@ -130,15 +309,76 @@
     this.rightArm = vm.rightArm;
     this.leftArm = vm.leftArm;
     this._hipPos = vm.root.position.clone();
-    this._adsPos = new THREE.Vector3(0.08, -0.26, -0.4);
+    this._adsPos = adsPosFromHip(this._hipPos);
     this._gunRest = null;
+    // Rest poses are captured per gun; a stale cache would replay the previous
+    // gun's arm placement after the next reload or holster animation.
+    this._leftArmRest = null;
+    this._viewRightHand = this.gunNode ? this.gunNode.getObjectByName('ViewRightHand') : null;
+    this._viewLeftHand = this.gunNode ? this.gunNode.getObjectByName('ViewLeftHand') : null;
+    if (this._viewRightHand) this._viewRightHand.userData._adsHandRest = null;
+    if (this._viewLeftHand) this._viewLeftHand.userData._adsHandRest = null;
+    if (this.rightArm) this.rightArm.userData._adsPoseRest = null;
+    if (this.leftArm) this.leftArm.userData._adsPoseRest = null;
+    // Melee and throwables restore arm visibility wholesale, so the one-handed
+    // hold has to be recorded here for them to honour.
+    this._hideLeftArm = !!vm.oneHanded;
     this._weaponViewModel = this.viewModel;
     this._weaponGunNode = this.gunNode;
     this._weaponMuzzle = this.muzzle;
     this._weaponFlash = this.muzzleFlash;
     this._weaponHip = this._hipPos.clone();
-    this._weaponAds = this._adsPos.clone();
     this.camera.add(this.viewModel);
+    this._adsSight = findAdsSight(this.gunNode);
+    this._adsLookOver = !weaponIsSniper(weaponId);
+    this._adsPos = this._adsLookOver
+      ? adsPosFromLookOver(this.viewModel, this.gunNode, this._hipPos, this.camera)
+      : adsPosFromHip(this._hipPos);
+    this._weaponAds = this._adsPos.clone();
+    // Build mode owns the viewmodel while it is active; don't steal it back.
+    if (this._heldMode === 'build') this.viewModel.visible = false;
+    this._snapEquipPose();
+  };
+
+  /** Doodle switch: gun starts dipped and pitches up (ease-out cubic, ~0.31s). */
+  Player.prototype.beginWeaponDraw = function () {
+    this._equipT = 0;
+    this._snapEquipPose();
+  };
+
+  Player.prototype._equipRaise = function () {
+    const t = this._equipT == null ? 1 : this._equipT;
+    if (t >= 1) return 0;
+    return Math.pow(1 - t, 3);
+  };
+
+  Player.prototype._snapEquipPose = function () {
+    if (!this.viewModel) return;
+    const r = this._equipRaise();
+    if (!r) return;
+    const g = feelGroup('gun');
+    const dip = g.equipDip != null ? g.equipDip : 0.32;
+    const pitch = g.equipPitch != null ? g.equipPitch : 0.9;
+    this.viewModel.position.y -= dip * r;
+    this.viewModel.rotation.x -= pitch * r;
+  };
+
+  /** Swap the held gun mesh without touching the class. */
+  Player.prototype.applyWeaponModel = function (weaponId) {
+    if (!weaponId || !global.VF.Soldier) return;
+    if (this.weaponId === weaponId && this._weaponViewModel) return;
+    this.weaponId = weaponId;
+    const wasBuild = this._heldMode === 'build';
+    this._rebuildWeaponViewModel(this.classId, weaponId);
+    if (!wasBuild) this.setHeldMode('weapon');
+  };
+
+  /** Swap first-person arms / gun look to match selected class */
+  Player.prototype.applyClass = function (classId) {
+    if (!classId || !global.VF.Soldier) return;
+    this.classId = classId;
+    const wasBuild = this._heldMode === 'build';
+    this._rebuildWeaponViewModel(classId, this.weaponId);
     this._heldMode = 'weapon';
     if (wasBuild) this.setHeldMode('build');
     const wpn = global.VF.game && global.VF.game.weapons;
@@ -202,6 +442,7 @@
     const spawn = world.getSpawnPosition();
     this.object.position.copy(spawn);
     this.velocity.set(0, 0, 0);
+    this._viewY = null;
     this.zipRide = null;
     const sel = world.getSelectedSpawn && world.getSelectedSpawn();
     const target =
@@ -292,7 +533,7 @@
     this.muzzle = muzzle;
     this.muzzleFlash = flash;
     this._hipPos = root.position.clone();
-    this._adsPos = new THREE.Vector3(0.04, -0.22, -0.42);
+    this._adsPos = adsPosFromHip(this._hipPos);
     return root;
   };
 
@@ -304,6 +545,7 @@
       if (e.key === 'f' || e.key === 'F') self.keys['KeyF'] = true;
       if (['Space', 'Tab'].includes(e.code)) e.preventDefault();
       if (e.code === 'ControlLeft' || e.code === 'ControlRight') e.preventDefault();
+      if (e.code === 'KeyC' && self.locked) e.preventDefault();
     });
     document.addEventListener('keyup', (e) => {
       self.keys[e.code] = false;
@@ -312,6 +554,7 @@
 
     document.addEventListener('mousemove', (e) => {
       if (!self.locked) return;
+      if (self._inspecting) return;
       if (self._lookIgnoreUntil && performance.now() < self._lookIgnoreUntil) return;
       const mx0 = e.movementX || 0;
       const my0 = e.movementY || 0;
@@ -320,27 +563,31 @@
       if (mx0 * mx0 + my0 * my0 > LOOK_WARP_PX2) return;
       const mx = mx0 > LOOK_CLAMP_PX ? LOOK_CLAMP_PX : mx0 < -LOOK_CLAMP_PX ? -LOOK_CLAMP_PX : mx0;
       const my = my0 > LOOK_CLAMP_PX ? LOOK_CLAMP_PX : my0 < -LOOK_CLAMP_PX ? -LOOK_CLAMP_PX : my0;
-      let sens = feelGroup('camera').mouseSens != null ? feelGroup('camera').mouseSens : MOUSE_SENS;
-      if (self.aiming) {
-        sens =
-          feelGroup('camera').adsSens != null ? feelGroup('camera').adsSens : ADS_SENS;
-        const def = self._weaponDef && self._weaponDef();
-        if (def && def.adsSens != null) {
-          const base =
-            feelGroup('camera').mouseSens != null ? feelGroup('camera').mouseSens : MOUSE_SENS;
-          sens = base * def.adsSens;
-        }
+      const camFeel = feelGroup('camera');
+      let sens = camFeel.mouseSens != null ? camFeel.mouseSens : MOUSE_SENS;
+      const adsT = Math.max(0, Math.min(1, self._adsBlend || 0));
+      const def = self._weaponDef && self._weaponDef();
+      let adsMul = ADS_SENS / MOUSE_SENS;
+      if (def && def.adsSens != null) adsMul = def.adsSens;
+      else if (camFeel.adsSens != null && (camFeel.mouseSens || MOUSE_SENS)) {
+        adsMul = camFeel.adsSens / (camFeel.mouseSens != null ? camFeel.mouseSens : MOUSE_SENS);
       }
+      sens *= 1 - adsT * (1 - adsMul);
       if (global.VF.Throwables && global.VF.Throwables.lookMul) {
         sens *= global.VF.Throwables.lookMul();
       }
-      self.yaw -= mx * sens;
-      self.pitch -= my * sens;
+      const yawD = -mx * sens;
+      const pitchD = -my * sens;
+      self.yaw += yawD;
+      self.pitch += pitchD;
       self.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, self.pitch));
+      self._lookDx = (self._lookDx || 0) + yawD;
+      self._lookDy = (self._lookDy || 0) + pitchD;
     });
 
     document.addEventListener('mousedown', (e) => {
       if (!self.locked) return;
+      if (self._inspecting) return;
       if (e.button === 2) {
         const wdef = self._weaponDef && self._weaponDef();
         if (!(wdef && wdef.melee)) {
@@ -394,6 +641,58 @@
     return this.world.collideAABB(box).length === 0;
   };
 
+  Player.prototype._resetCrouchStance = function () {
+    this.crouching = false;
+    this._crouchToggle = false;
+    this.slide = false;
+    this._slideT = 0;
+    this._slideDx = 0;
+    this._slideDz = 0;
+  };
+
+  /**
+   * COD MW stance:
+   *   C tap     → toggle crouch (sprint + C → slide)
+   *   Ctrl hold → crouch while held; release stands if not toggled
+   *   Shift     → sprint; standing sprint + crouch = slide; sprint cancels toggle-crouch
+   * Slide ends crouched. Low ceiling blocks stand.
+   */
+  Player.prototype._tryBeginSlide = function () {
+    const pm = feelGroup('playerMove');
+    if (!this.onGround || this.slide || this.zipRide) return false;
+    let dx = this.velocity.x;
+    let dz = this.velocity.z;
+    let len = Math.hypot(dx, dz);
+    if (len < 0.4) {
+      dx = -Math.sin(this.yaw);
+      dz = -Math.cos(this.yaw);
+      len = 1;
+    }
+    this.slide = true;
+    this._slideT = pm.slideDur != null ? pm.slideDur : SLIDE_DUR;
+    this._slideDx = dx / len;
+    this._slideDz = dz / len;
+    this.crouching = true;
+    this._crouchToggle = true;
+    if (this.punchFeedback) this.punchFeedback({ shake: 0.07, pitch: 0.04 });
+    return true;
+  };
+
+  Player.prototype._endSlide = function (keepCrouch) {
+    this.slide = false;
+    this._slideT = 0;
+    this._slideCool = SLIDE_COOL;
+    if (keepCrouch === false) {
+      if (this._canStand()) {
+        this.crouching = false;
+        this._crouchToggle = false;
+      }
+    } else {
+      this.crouching = true;
+      this._crouchToggle = true;
+    }
+  };
+
   Player.prototype.getLookDirection = function () {
     const dir = new THREE.Vector3(0, 0, -1);
     dir.applyEuler(
@@ -412,7 +711,7 @@
     this.euler.set(
       this.pitch + (this._viewPunchPitch || 0),
       this.yaw + (this._viewPunchYaw || 0),
-      0,
+      this._camRoll || 0,
       'YXZ'
     );
     this.camera.quaternion.setFromEuler(this.euler);
@@ -551,11 +850,138 @@
     const poseRoll = g.poseRoll != null ? g.poseRoll : 0.12;
     const poseY = g.poseY != null ? g.poseY : 0.05;
     const poseZ = g.poseZ != null ? g.poseZ : 0.06;
-    this.gunNode.rotation.x = rest.rx + kick * posePitch + rack;
-    this.gunNode.rotation.z = rest.rz + kick * poseRoll;
+    const adsHold = 1 - Math.max(0, Math.min(1, this._adsBlend || 0));
+    this.gunNode.rotation.x = rest.rx * adsHold + kick * posePitch + rack;
+    this.gunNode.rotation.y = rest.ry * adsHold;
+    this.gunNode.rotation.z = rest.rz * adsHold + kick * poseRoll;
     this.gunNode.position.x = rest.x;
     this.gunNode.position.y = rest.y + kick * poseY - rack * 0.04;
     this.gunNode.position.z = rest.z - kick * poseZ;
+  };
+
+  /** Lock look-over after bob / recoil: X on midline, gun top just under the +. */
+  Player.prototype._alignViewmodelSight = function (blend) {
+    const vm = this.viewModel;
+    const cam = this.camera;
+    if (this._adsLookOver === false) return;
+    if (!vm || !cam || !this.gunNode || !(blend > 0.01)) return;
+    vm.updateMatrixWorld(true);
+    let sight = this._adsSight;
+    if (sight && !sight.parent) {
+      sight = this._adsSight = findAdsSight(this.gunNode);
+    }
+    const st = pickAdsScreen(cam, this.gunNode, sight);
+    if (!st.ok) return;
+    vm.position.x -= st.cx * blend;
+    vm.position.y += adsLookOverDeltaY(cam, st) * blend;
+  };
+
+  /**
+   * Look-over ADS centres the gun and would drag the camo sleeves into both
+   * sides of the frame. Fade those sleeves, but keep the grip hands and aim
+   * the skin forearms at them so the gun is held from below — not a floating
+   * palm with no wrist.
+   */
+  Player.prototype._applyAdsArmTuck = function (blend) {
+    const skip =
+      this._heldMode === 'build' ||
+      this._inspecting ||
+      (global.VF.Throwables && global.VF.Throwables.busy && global.VF.Throwables.busy()) ||
+      (this._weaponDef && this._weaponDef() && this._weaponDef().melee);
+    const b = skip || this._adsLookOver === false ? 0 : Math.max(0, Math.min(1, blend || 0));
+    const oneHanded = !!this._hideLeftArm;
+    const vm = this.viewModel;
+
+    const restPos = function (node) {
+      if (!node.userData._adsHandRest) node.userData._adsHandRest = node.position.clone();
+      return node.userData._adsHandRest;
+    };
+    const restPose = function (node) {
+      if (!node.userData._adsPoseRest) {
+        node.userData._adsPoseRest = {
+          x: node.position.x,
+          y: node.position.y,
+          z: node.position.z,
+          rx: node.rotation.x,
+          ry: node.rotation.y,
+          rz: node.rotation.z,
+        };
+      }
+      return node.userData._adsPoseRest;
+    };
+    const fadeSleeve = function (arm, allow) {
+      if (!arm) return;
+      const sleeve =
+        arm.getObjectByName('ViewRightSleeve') || arm.getObjectByName('ViewLeftSleeve');
+      if (!sleeve) return;
+      const s = allow ? Math.max(0.04, 1 - b) : 1;
+      sleeve.scale.setScalar(s);
+      sleeve.visible = !allow || s > 0.14;
+    };
+    const setForeScale = function (arm, s) {
+      if (!arm) return;
+      const fore =
+        arm.getObjectByName('ViewRightForearm') || arm.getObjectByName('ViewLeftForearm');
+      if (fore) fore.scale.setScalar(s);
+    };
+    const poseHand = function (node, visible) {
+      if (!node) return;
+      node.position.copy(restPos(node));
+      node.scale.setScalar(skip ? 1 : 1 - b * 0.18);
+      if (visible != null) node.visible = visible;
+    };
+    // Wrist box sits at local ~-Y on the arm; rotate from below then park
+    // that point on the gun-parented hand. Drop a bit more so the limb
+    // leaves the bottom of the frame instead of sitting as a slab.
+    const attachArm = function (arm, hand, wristLocal, allow, freeze) {
+      if (!arm) return;
+      const rest = restPose(arm);
+      if (freeze) {
+        setForeScale(arm, 1);
+        return;
+      }
+      if (!allow || !(b > 0.01) || !hand || !vm) {
+        arm.position.set(rest.x, rest.y, rest.z);
+        arm.rotation.set(rest.rx, rest.ry, rest.rz);
+        arm.scale.setScalar(1);
+        setForeScale(arm, 1);
+        return;
+      }
+      arm.visible = true;
+      arm.scale.setScalar(1);
+      const rx = rest.rx + (1.12 - rest.rx) * b;
+      const ry = rest.ry * (1 - 0.45 * b);
+      const rz = rest.rz * (1 - 0.4 * b);
+      arm.rotation.set(rx, ry, rz);
+      vm.updateMatrixWorld(true);
+      hand.updateWorldMatrix(true);
+      hand.getWorldPosition(_adsWorld);
+      vm.worldToLocal(_adsWorld);
+      _adsArmWrist.copy(wristLocal).applyEuler(arm.rotation);
+      _adsTmp.set(rest.x, rest.y, rest.z);
+      arm.position.lerpVectors(_adsTmp, _adsWorld.sub(_adsArmWrist), b);
+      arm.position.y -= 0.07 * b;
+      setForeScale(arm, 1 - 0.28 * b);
+    };
+
+    fadeSleeve(this.rightArm, !skip);
+    fadeSleeve(this.leftArm, !skip && !oneHanded);
+
+    poseHand(this._viewRightHand, skip ? null : true);
+    if (oneHanded) poseHand(this._viewLeftHand, false);
+    else poseHand(this._viewLeftHand, skip ? null : true);
+
+    const weapons = global.VF.game && global.VF.game.weapons;
+    const reloading = !!(weapons && weapons.getReloadAnim && weapons.getReloadAnim() > 0.05);
+    attachArm(this.rightArm, this._viewRightHand, ADS_WRIST_R, !skip, skip);
+    attachArm(
+      this.leftArm,
+      this._viewLeftHand,
+      ADS_WRIST_L,
+      !skip && !oneHanded,
+      skip || reloading
+    );
+    if (oneHanded && this.leftArm && !skip) this.leftArm.visible = false;
   };
 
   Player.prototype.addShake = function (amount) {
@@ -723,6 +1149,7 @@
     this.alive = false;
     this.health = 0;
     this.spawnProtect = 0;
+    if (global.VF.Career && global.VF.Career.noteDeath) global.VF.Career.noteDeath();
 
     const tdm = global.VF.TdmMatch;
     const ffa = global.VF.FfaMatch;
@@ -769,6 +1196,7 @@
     this.velocity.set(0, 0, 0);
     this.zipRide = null;
     this.aiming = false;
+    this._resetCrouchStance();
     if (global.VF.game && global.VF.game.skills && global.VF.game.skills._clearStealth) {
       global.VF.game.skills._clearStealth(true);
     }
@@ -847,9 +1275,10 @@
     this.health = this.maxHealth || 100;
     this.armor = Math.min(this.maxArmor || 100, 50);
     this.velocity.set(0, 0, 0);
+    this._viewY = null;
     this.zipRide = null;
     this.aiming = false;
-    this.crouching = false;
+    this._resetCrouchStance();
     this.stealthed = false;
     this.ghostAmbushShot = false;
     this.skillSpeedBuffTimer = 0;
@@ -864,6 +1293,11 @@
     if (global.VF.UI && global.VF.UI.updateVitals) {
       global.VF.UI.updateVitals(this.health, this.armor);
     }
+    const wpn = global.VF.game && global.VF.game.weapons;
+    if (wpn && wpn.resetAmmo) wpn.resetAmmo();
+    if (global.VF.Throwables && global.VF.Throwables.refill) {
+      global.VF.Throwables.refill();
+    }
   };
 
   Player.prototype._hideViewModels = function (hide) {
@@ -874,9 +1308,13 @@
   };
 
   Player.prototype._updateDeadCam = function (dt) {
+    if (this._inspecting) {
+      if (this.updateWeaponInspect) this.updateWeaponInspect(dt);
+      return;
+    }
     this._deathBlend = Math.min(1, (this._deathBlend || 0) + dt / 0.36);
     this.aiming = false;
-    this._adsBlend = Math.max(0, (this._adsBlend || 0) - dt * 8);
+    this._adsBlend = expSmooth(this._adsBlend || 0, 0, 8, dt);
     this._hideViewModels(true);
     this._updateViewPunch(dt);
     this._syncCameraLook();
@@ -926,6 +1364,9 @@
       this._zipKeyWasDown = fDown;
       this._zipJumpWasDown = jumpDown;
       if (this.zipRide) {
+        this._ctrlWas = !!(this.keys['ControlLeft'] || this.keys['ControlRight']);
+        this._cWas = !!this.keys['KeyC'];
+        this._shiftWas = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
         const eye = this.getEyePosition();
         this.camera.position.set(eye.x, eye.y, eye.z);
         this.camera.fov = HIP_FOV;
@@ -939,44 +1380,85 @@
     this._zipKeyWasDown = fDown;
     this._zipJumpWasDown = jumpDown;
 
+    const ctrlDown =
+      !frozen && !!(this.keys['ControlLeft'] || this.keys['ControlRight']);
+    const cDown = !frozen && !!this.keys['KeyC'];
+    const ctrlPressed = ctrlDown && !this._ctrlWas;
+    const cPressed = cDown && !this._cWas;
+    this._ctrlWas = ctrlDown;
+    this._cWas = cDown;
+    if (this._slideCool > 0) this._slideCool = Math.max(0, this._slideCool - dt);
+
     // Movement input
     const forward = frozen ? 0 : this.keys['KeyW'] ? 1 : 0;
     const back = frozen ? 0 : this.keys['KeyS'] ? 1 : 0;
     const left = frozen ? 0 : this.keys['KeyA'] ? 1 : 0;
     const right = frozen ? 0 : this.keys['KeyD'] ? 1 : 0;
-    const wantCrouch =
-      !frozen &&
-      !!(this.keys['ControlLeft'] || this.keys['ControlRight']) &&
-      this.onGround &&
-      !this.zipRide;
-    if (wantCrouch) {
-      this.crouching = true;
-    } else if (this.crouching && this._canStand()) {
-      this.crouching = false;
-    }
-    this._crouchBlend += ((this.crouching ? 1 : 0) - this._crouchBlend) * Math.min(1, dt * 14);
-
-    const sprint =
-      !frozen &&
-      !this.crouching &&
-      (this.keys['ShiftLeft'] || this.keys['ShiftRight']);
-
     this.direction.set(right - left, 0, back - forward);
     if (this.direction.lengthSq() > 0) this.direction.normalize();
 
-    // Rotate move vector by yaw
     const sin = Math.sin(this.yaw);
     const cos = Math.cos(this.yaw);
     const mx = this.direction.x * cos + this.direction.z * sin;
     const mz = -this.direction.x * sin + this.direction.z * cos;
 
+    const shiftDown = !frozen && !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
+    const shiftPressed = shiftDown && !this._shiftWas;
+    this._shiftWas = shiftDown;
+    const dashing = global.VF.game && global.VF.game.skills && global.VF.game.skills.dash;
+    if (dashing && this.slide) this._endSlide(false);
+    if (frozen && this.slide) this._endSlide(true);
+
+    if (!this.slide && !this.zipRide && !frozen && !dashing) {
+      const moving = this.direction.lengthSq() > 0;
+      const fastEnough = Math.hypot(this.velocity.x, this.velocity.z) > 2;
+      const canSlide =
+        this.onGround &&
+        shiftDown &&
+        !this.crouching &&
+        !this.aiming &&
+        this._slideCool <= 0 &&
+        (moving || fastEnough);
+      if ((ctrlPressed || cPressed) && canSlide && this._tryBeginSlide()) {
+        // sprint + crouch → slide
+      } else {
+        if (cPressed) {
+          if (ctrlDown) {
+            this._crouchToggle = true;
+          } else if (this._crouchToggle || this.crouching) {
+            if (this._canStand()) {
+              this._crouchToggle = false;
+              this.crouching = false;
+            }
+          } else {
+            this._crouchToggle = true;
+          }
+        }
+        if (ctrlDown) this.crouching = true;
+        else if (this._crouchToggle) this.crouching = true;
+        else if (this.crouching && this._canStand()) this.crouching = false;
+
+        if (shiftPressed && !ctrlDown && this.crouching && this._canStand()) {
+          this.crouching = false;
+          this._crouchToggle = false;
+        }
+      }
+    }
+
+    const crouchTarget = this.slide || this.crouching ? 1 : 0;
+    this._crouchBlend += (crouchTarget - this._crouchBlend) * Math.min(1, dt * 14);
+
+    const sprint = !frozen && !this.crouching && !this.slide && shiftDown;
+
     const pm = feelGroup('playerMove');
     const baseSpeed = pm.moveSpeed != null ? pm.moveSpeed : MOVE_SPEED;
     const adsMul = pm.adsMul != null ? pm.adsMul : 0.55;
     const crouchMul = pm.crouchMul != null ? pm.crouchMul : CROUCH_SPEED_MULT;
+    const slideMul = pm.slideMul != null ? pm.slideMul : SLIDE_MULT;
     const feelSprintMul = pm.sprintMul != null ? pm.sprintMul : SPRINT_MULT;
     let speedMul = this.aiming ? adsMul : 1;
-    if (this.crouching) speedMul *= crouchMul;
+    if (this.slide) speedMul = slideMul;
+    else if (this.crouching) speedMul *= crouchMul;
     else if (sprint && !this.aiming) speedMul *= feelSprintMul;
     if (this.skillSpeedBuffTimer > 0) {
       speedMul *= this.skillSpeedBuffMul || 1.2;
@@ -985,7 +1467,7 @@
       speedMul *= global.VF.Throwables.moveMul();
     }
     const heldDef = this._weaponDef && this._weaponDef();
-    if (heldDef && heldDef.melee && !this.aiming) {
+    if (heldDef && heldDef.melee && !this.aiming && !this.slide) {
       speedMul *= sprint
         ? heldDef.sprintSpeedMul != null
           ? heldDef.sprintSpeedMul
@@ -994,24 +1476,31 @@
           ? heldDef.moveSpeedMul
           : 1.12;
     }
-    const dashing = global.VF.game && global.VF.game.skills && global.VF.game.skills.dash;
     if (dashing) {
       this.velocity.x = 0;
       this.velocity.y = 0;
       this.velocity.z = 0;
+    } else if (this.slide) {
+      const slideSpeed = baseSpeed * slideMul;
+      this.velocity.x = this._slideDx * slideSpeed;
+      this.velocity.z = this._slideDz * slideSpeed;
     } else {
       const speed = baseSpeed * speedMul;
       this.velocity.x = mx * speed;
       this.velocity.z = mz * speed;
     }
 
-    // Jump + gravity (jump exits crouch when headroom allows)
+    // Jump + gravity (jump exits crouch / cancels slide when headroom allows)
     if (!dashing) {
       if (this.onGround && this.keys['Space'] && !frozen) {
+        if (this.slide) this._endSlide(true);
         if (this.crouching) {
-          if (this._canStand()) this.crouching = false;
+          if (this._canStand()) {
+            this.crouching = false;
+            this._crouchToggle = false;
+          }
         }
-        if (!this.crouching) {
+        if (!this.crouching && !this.slide) {
           this.velocity.y = JUMP_VEL;
           this.onGround = false;
           if (global.VF.Audio) global.VF.Audio.play('jump');
@@ -1020,7 +1509,14 @@
       this.velocity.y -= GRAVITY * dt;
     }
 
+    const slideX = this.object.position.x;
+    const slideZ = this.object.position.z;
     this._moveWithCollision(dt);
+    if (this.slide) {
+      const moved = Math.hypot(this.object.position.x - slideX, this.object.position.z - slideZ);
+      this._slideT -= dt;
+      if (this._slideT <= 0 || moved < 0.5 * dt) this._endSlide(true);
+    }
 
     if (this._overlaps && this._overlaps() && this.direction.lengthSq() > 0) {
       this._stuckMoveT = (this._stuckMoveT || 0) + dt;
@@ -1035,7 +1531,7 @@
     // Sync camera to eye
     const eye = this.getEyePosition();
     // Head bob
-    const moving = this.direction.lengthSq() > 0 && this.onGround;
+    const moving = this.direction.lengthSq() > 0 && this.onGround && !this.slide;
     if (moving) this._bobTime += dt * (this.crouching ? 7 : sprint ? 12 : 9);
     const bob = moving ? Math.sin(this._bobTime) * (this.crouching ? 0.018 : 0.035) : 0;
     let sx = 0;
@@ -1057,7 +1553,7 @@
     } else {
       this._shake = 0;
     }
-    this.camera.position.set(eye.x + sx, eye.y + bob + sy, eye.z + sz);
+    this._applySmoothedEyeCam(eye, dt, bob, sx, sy, sz);
 
     // ADS / held-item base pose (no ADS while reloading)
     const weapons = global.VF.game && global.VF.game.weapons;
@@ -1070,22 +1566,60 @@
       this.aiming && this._heldMode !== 'build' && reloadW < 0.05 && !(held && held.melee) && !throwBusy
         ? 1
         : 0;
-    this._adsBlend += (adsTarget - this._adsBlend) * Math.min(1, dt * 12);
+    const adsTime = held && held.adsTime != null ? held.adsTime : 0.22;
+    const camFeel = feelGroup('camera');
+    const adsBlendIn =
+      camFeel.adsBlendIn != null ? camFeel.adsBlendIn : 3 / Math.max(0.08, adsTime);
+    const adsBlendOut =
+      camFeel.adsBlendOut != null ? camFeel.adsBlendOut : adsBlendIn * 0.72;
+    this._adsBlend = expSmooth(
+      this._adsBlend || 0,
+      adsTarget,
+      adsTarget ? adsBlendIn : adsBlendOut,
+      dt
+    );
+
+    const lookX = this._lookDx || 0;
+    const lookY = this._lookDy || 0;
+    this._lookDx = 0;
+    this._lookDy = 0;
+    const lx = THREE.MathUtils.clamp(lookX, -0.12, 0.12);
+    const ly = THREE.MathUtils.clamp(lookY, -0.12, 0.12);
+    const adsLoose = 1 - (this._adsBlend || 0);
+    const strafe = this.direction ? this.direction.x : 0;
+    if (!this._lookSwayPos) this._lookSwayPos = new THREE.Vector3();
+    if (!this._lookSwayRot) this._lookSwayRot = new THREE.Vector3();
+    this._lookSwayPos.x = expSmooth(this._lookSwayPos.x, lx * 0.5 * adsLoose, 10, dt);
+    this._lookSwayPos.y = expSmooth(this._lookSwayPos.y, ly * 0.35 * adsLoose, 10, dt);
+    this._lookSwayRot.y = expSmooth(this._lookSwayRot.y, lx * 1.4 * adsLoose, 10, dt);
+    this._lookSwayRot.x = expSmooth(this._lookSwayRot.x, ly * 0.9 * adsLoose, 10, dt);
+    this._lookSwayRot.z = expSmooth(
+      this._lookSwayRot.z,
+      (-lx * 1.8 - strafe * 0.06) * adsLoose,
+      8,
+      dt
+    );
+    const rollTarget = -strafe * (camFeel.camRoll != null ? camFeel.camRoll : 0.022) + (this.slide ? -0.08 : 0);
+    this._camRoll = expSmooth(this._camRoll || 0, this.dead ? 0 : rollTarget, 9, dt);
 
     // Run sway: gun follows footsteps (side + vertical + light roll)
     const wantSway = moving && reloadW < 0.2 ? 1 : 0;
     this._swayBlend += (wantSway - (this._swayBlend || 0)) * Math.min(1, dt * (moving ? 10 : 7));
     const sway = this._swayBlend || 0;
-    const adsDamp = 1 - this._adsBlend * 0.72;
-    const sprintMul = sprint && !this.aiming ? 1.4 : this.crouching ? 0.55 : 1;
+    const adsDamp = adsLoose;
+    const sprintMul = sprint && !this.aiming ? 1.4 : this.crouching || this.slide ? 0.55 : 1;
     const t = this._bobTime;
     const crouchDip = (this._crouchBlend || 0) * 0.14;
-    const ax = Math.sin(t) * 0.032 * sway * sprintMul * adsDamp;
-    const ay = -Math.abs(Math.sin(t)) * 0.026 * sway * sprintMul * adsDamp - crouchDip;
+    const ax = Math.sin(t) * 0.032 * sway * sprintMul * adsDamp + this._lookSwayPos.x;
+    const ay =
+      -Math.abs(Math.sin(t)) * 0.026 * sway * sprintMul * adsDamp - crouchDip * adsLoose + this._lookSwayPos.y;
     const az = Math.cos(t) * 0.014 * sway * adsDamp;
-    const rRoll = Math.sin(t) * 0.055 * sway * sprintMul * adsDamp;
-    const rPitch = Math.cos(t * 2) * 0.03 * sway * adsDamp + (this._crouchBlend || 0) * 0.08;
-    const rYaw = Math.sin(t * 0.5) * 0.02 * sway * adsDamp;
+    const rRoll = Math.sin(t) * 0.055 * sway * sprintMul * adsDamp + this._lookSwayRot.z;
+    const rPitch =
+      Math.cos(t * 2) * 0.03 * sway * adsDamp +
+      (this._crouchBlend || 0) * 0.08 +
+      this._lookSwayRot.x;
+    const rYaw = Math.sin(t * 0.5) * 0.02 * sway * adsDamp + this._lookSwayRot.y;
 
     // Reload: tilt gun down/right, dip viewmodel
     const rl = reloadW;
@@ -1096,14 +1630,26 @@
     const rlYaw = -0.35 * rl;
     const rlRoll = 0.28 * rl;
 
+    const gFeel = feelGroup('gun');
+    const equipRate = gFeel.equipRate != null ? gFeel.equipRate : 3.2;
+    this._equipT = Math.min(1, (this._equipT == null ? 1 : this._equipT) + dt * equipRate);
+    const eq = this._equipRaise();
+    const eqDip = (gFeel.equipDip != null ? gFeel.equipDip : 0.32) * eq;
+    const eqPitch = (gFeel.equipPitch != null ? gFeel.equipPitch : 0.9) * eq;
+
     if (this.viewModel) {
       this._vmBase.lerpVectors(this._hipPos, this._adsPos, this._adsBlend);
       this.viewModel.position.set(
         this._vmBase.x + ax + rlSideX,
-        this._vmBase.y + ay + rlDipY,
+        this._vmBase.y + ay + rlDipY - eqDip,
         this._vmBase.z + az + rlPullZ
       );
-      this.viewModel.rotation.set(rPitch + rlPitch, rYaw + rlYaw, rRoll + rlRoll);
+      const rotMul = adsLoose;
+      this.viewModel.rotation.set(
+        (rPitch + rlPitch) * rotMul - eqPitch,
+        (rYaw + rlYaw) * rotMul,
+        (rRoll + rlRoll) * rotMul
+      );
     }
 
     // Gun recoil only while holding a weapon
@@ -1156,15 +1702,21 @@
     }
     }
 
-    // FOV — weapon scope zoom + arcade punch (hit tighten / hurt widen)
+    // FOV first so look-over NDC uses the zoom we are about to draw (doodle
+    // keeps FOV independent of the gun blend, but the silhouette still has
+    // to stay under the + as the lens tightens).
     const def = this._weaponDef && this._weaponDef();
     const cam = feelGroup('camera');
     const hipFov = cam.hipFov != null ? cam.hipFov : HIP_FOV;
     const adsFov =
       def && def.adsFov != null ? def.adsFov : cam.adsFov != null ? cam.adsFov : ADS_FOV;
-    let targetFov = THREE.MathUtils.lerp(hipFov, adsFov, this._adsBlend);
+    const fovIn = cam.adsFovIn != null ? cam.adsFovIn : 16;
+    const fovOut = cam.adsFovOut != null ? cam.adsFovOut : 8;
+    const fovTarget = adsTarget ? adsFov : hipFov;
+    if (this._adsFov == null) this._adsFov = hipFov;
+    this._adsFov = expSmooth(this._adsFov, fovTarget, adsTarget ? fovIn : fovOut, dt);
+    let targetFov = this._adsFov;
     if (this._fovPunch) {
-      // Hit punch recovers faster (~90ms); hurt widen a touch slower
       const recover = this._fovPunch < 0 ? 14 : 11;
       this._fovPunch += (0 - this._fovPunch) * Math.min(1, dt * recover);
       if (Math.abs(this._fovPunch) < 0.05) this._fovPunch = 0;
@@ -1178,14 +1730,166 @@
       this.camera.fov = targetFov;
     }
 
-    // Hide held gun when throwing, or when looking through optic / sniper scope
+    this._alignViewmodelSight(this._adsBlend || 0);
+    this._applyAdsArmTuck(this._adsBlend || 0);
+
+    // Hide held gun when throwing, or when looking through a sniper scope overlay
     if (throwBusy) {
       if (this.viewModel) this.viewModel.visible = false;
     } else if (this.viewModel && this._heldMode !== 'build') {
       const scope = def && def.scope;
-      const hideGun = this._adsBlend > 0.55 && (scope === 'sniper' || scope === 'optic');
+      const hideGun = this._adsBlend > 0.78 && scope === 'sniper';
       this.viewModel.visible = !hideGun;
     }
+  };
+
+  /**
+   * Match-end inspect: lift the gun into frame, yaw to show the side, dip the
+   * camera slightly. Runs while the sim is frozen; click-to-skip lives in
+   * VF.WeaponInspect.
+   */
+  Player.prototype.beginWeaponInspect = function () {
+    this._inspecting = true;
+    this._inspectT = 0;
+    this.aiming = false;
+    this._adsBlend = 0;
+    this._adsFov = HIP_FOV;
+    this._lookDx = 0;
+    this._lookDy = 0;
+    if (this._lookSwayPos) this._lookSwayPos.set(0, 0, 0);
+    if (this._lookSwayRot) this._lookSwayRot.set(0, 0, 0);
+    this._camRoll = 0;
+    this._viewY = null;
+    this._recoilKick = 0;
+    this._recoilVel = 0;
+    this._viewPunchPitch = 0;
+    this._viewPunchYaw = 0;
+    this._viewPunchPitchVel = 0;
+    this._viewPunchYawVel = 0;
+    this._fovPunch = 0;
+    this._shake = 0;
+    this._resetCrouchStance();
+    this._inspectPitch = 0;
+    this._inspectYaw = 0;
+    this._inspectRoll = 0;
+    this._inspectStartFov = this.camera && this.camera.fov != null ? this.camera.fov : HIP_FOV;
+    this._inspectHip = this._hipPos
+      ? this._hipPos.clone()
+      : new THREE.Vector3(0.3, -0.34, -0.52);
+
+    const g = global.VF.game;
+    if (global.VF.Throwables && global.VF.Throwables._abortPose) {
+      global.VF.Throwables._abortPose();
+    }
+    if (g && g.building && g.building.active && g.building.exitMode) {
+      g.building.exitMode();
+    }
+    if (this.setHeldMode) this.setHeldMode('weapon');
+    if (g && g.weapons) {
+      g.weapons.mode = 'weapon';
+      g.weapons.firing = false;
+      if (g.weapons._cancelReload) g.weapons._cancelReload();
+    }
+    if (global.VF.UI && global.VF.UI.hideDeath) global.VF.UI.hideDeath();
+    this._hideViewModels(false);
+    if (this.viewModel) this.viewModel.visible = true;
+
+    if (this.gunNode && !this._gunRest) {
+      this._gunRest = {
+        x: this.gunNode.position.x,
+        y: this.gunNode.position.y,
+        z: this.gunNode.position.z,
+        rx: this.gunNode.rotation.x,
+        ry: this.gunNode.rotation.y,
+        rz: this.gunNode.rotation.z,
+      };
+    }
+    if (this.leftArm && !this._leftArmRest) {
+      this._leftArmRest = {
+        y: this.leftArm.position.y,
+        z: this.leftArm.position.z,
+        rx: this.leftArm.rotation.x,
+        rz: this.leftArm.rotation.z,
+      };
+    }
+  };
+
+  Player.prototype.updateWeaponInspect = function (dt) {
+    if (!this._inspecting || !this.camera) return;
+    this._inspectT = (this._inspectT || 0) + (dt > 0 ? dt : 0);
+    const t = this._inspectT;
+
+    this._crouchBlend = Math.max(0, (this._crouchBlend || 0) - dt * 4);
+    if (this.dead) {
+      this._deathBlend = Math.max(0, (this._deathBlend || 0) - dt * 1.6);
+    }
+
+    const raise = Math.min(1, t / 0.42);
+    const e = raise * raise * (3 - 2 * raise);
+    const hold = Math.min(1, Math.max(0, (t - 0.28) / 1.55));
+    const he = hold * hold * (3 - 2 * hold);
+    const swayX = Math.sin(t * 1.55) * 0.007;
+    const swayY = Math.cos(t * 1.12) * 0.005;
+
+    const held = this._weaponDef && this._weaponDef();
+    const melee = !!(held && held.melee);
+    const hip = this._inspectHip || this._hipPos || new THREE.Vector3(0.3, -0.34, -0.52);
+    const tx = melee ? 0.12 : 0.12;
+    const ty = melee ? -0.2 : -0.22;
+    const tz = melee ? -0.5 : -0.56;
+
+    if (this.viewModel) {
+      this.viewModel.visible = true;
+      this.viewModel.position.set(
+        hip.x + (tx - hip.x) * e + swayX,
+        hip.y + (ty - hip.y) * e + swayY,
+        hip.z + (tz - hip.z) * e
+      );
+      const rx = 0.14 * e + 0.08 * he;
+      const ry = (melee ? 1.05 : 0.92) * he + Math.sin(t * 0.7) * 0.024;
+      const rz = 0.08 * e;
+      this.viewModel.rotation.set(rx, ry, rz);
+    }
+
+    if (this.gunNode && this._gunRest) {
+      this.gunNode.position.set(this._gunRest.x, this._gunRest.y, this._gunRest.z);
+      this.gunNode.rotation.set(this._gunRest.rx, this._gunRest.ry, this._gunRest.rz);
+    }
+    if (this.leftArm && this._leftArmRest) {
+      this.leftArm.rotation.x = this._leftArmRest.rx - 0.22 * he;
+      this.leftArm.rotation.z = this._leftArmRest.rz + 0.18 * he;
+      this.leftArm.position.y = this._leftArmRest.y - 0.02 * he;
+      this.leftArm.position.z = this._leftArmRest.z + 0.03 * he;
+    }
+
+    this._inspectPitch = -0.04 * e - 0.02 * he;
+    this._inspectYaw = 0.06 * he;
+    this._inspectRoll = 0.025 * e;
+    this.euler.set(
+      this.pitch + this._inspectPitch,
+      this.yaw + this._inspectYaw,
+      this._inspectRoll,
+      'YXZ'
+    );
+    this.camera.quaternion.setFromEuler(this.euler);
+
+    const eye = this.getEyePosition();
+    this.camera.position.set(eye.x, eye.y, eye.z);
+
+    const fov = THREE.MathUtils.lerp(this._inspectStartFov || HIP_FOV, melee ? 64 : 62, e);
+    if (Math.abs(this.camera.fov - fov) > 0.04) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    } else {
+      this.camera.fov = fov;
+    }
+  };
+
+  Player.prototype.endWeaponInspect = function () {
+    this._inspecting = false;
+    this._inspectPitch = 0;
+    this._inspectYaw = 0;
+    this._inspectRoll = 0;
   };
 
   Player.prototype._zipXYZ = function (p) {
@@ -1481,28 +2185,50 @@
   };
 
   /**
-   * True only when every voxel currently overlapping the body is a marked stair tread.
-   * Regular cubes / platforms reject auto step-up (need jump).
+   * How far to raise feet to stand on an overlapping stair tread (0 = none).
+   * Lands on the tread instead of popping a full STEP_UP then falling back.
    */
-  Player.prototype._canAutoStep = function () {
-    if (!this.world.isStairVoxel) return false;
+  Player.prototype._stairStepLift = function () {
+    if (!this.world.isStairVoxel) return 0;
     const hits = this.world.collideAABB(this._bodyBox());
-    if (!hits.length) return false;
+    if (!hits.length) return 0;
+    const pos = this.object.position;
+    let lift = 0;
     for (let i = 0; i < hits.length; i++) {
       const b = hits[i];
       const sx = b.max.x - b.min.x;
       const sy = b.max.y - b.min.y;
       const sz = b.max.z - b.min.z;
-      // Doors / mesh props are not stair treads
       if (Math.abs(sx - 1) > 0.02 || Math.abs(sy - 1) > 0.02 || Math.abs(sz - 1) > 0.02) {
-        return false;
+        continue;
       }
       const vx = Math.floor(b.min.x + 1e-6);
       const vy = Math.floor(b.min.y + 1e-6);
       const vz = Math.floor(b.min.z + 1e-6);
-      if (!this.world.isStairVoxel(vx, vy, vz)) return false;
+      if (!this.world.isStairVoxel(vx, vy, vz)) continue;
+      const need = b.max.y - pos.y + 0.002;
+      if (need > lift) lift = need;
     }
-    return true;
+    if (lift <= 0.01 || lift > STEP_UP) return 0;
+    return lift;
+  };
+
+  /** Hide 1m voxel-stair pops: follow eye Y with a short lag while grounded. */
+  Player.prototype._applySmoothedEyeCam = function (eye, dt, bob, sx, sy, sz) {
+    if (this._viewY == null || !isFinite(this._viewY)) this._viewY = eye.y;
+    const air = !this.onGround || this.zipRide;
+    const vy = this.velocity.y || 0;
+    if (air && (vy > 1.6 || vy < -5 || this.zipRide)) {
+      this._viewY = eye.y;
+    } else {
+      const cam = feelGroup('camera');
+      const rate = cam.stairSmooth != null ? cam.stairSmooth : 18;
+      this._viewY = expSmooth(this._viewY, eye.y, rate, dt);
+      const maxLag = 0.42;
+      if (this._viewY > eye.y + maxLag) this._viewY = eye.y + maxLag;
+      if (this._viewY < eye.y - maxLag) this._viewY = eye.y - maxLag;
+    }
+    this.camera.position.set(eye.x + sx, this._viewY + bob + sy, eye.z + sz);
   };
 
   /** Horizontal move; auto step-up only onto stair voxels (cubes require jump) */
@@ -1514,11 +2240,12 @@
     pos[axis] += delta;
     if (!this._overlaps()) return;
 
-    // Stairs keep auto step-up; solid cubes do not
-    if (this._canAutoStep()) {
-      pos.y = beforeY + STEP_UP;
+    const lift = this._stairStepLift();
+    if (lift > 0) {
+      pos.y = beforeY + lift;
       if (!this._overlaps()) {
-        // Keep raised; gravity settles feet onto the tread
+        this.velocity.y = 0;
+        this.onGround = true;
         return;
       }
     }

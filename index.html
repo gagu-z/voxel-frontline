@@ -75,7 +75,7 @@
     </aside>
 
     <nav class="lobby-dock" aria-label="快捷栏">
-      <button type="button" class="lobby-dock-item" data-lobby-action="weapons">武器</button>
+      <button type="button" class="lobby-dock-item" data-lobby-action="loadout">装备</button>
       <span class="lobby-dock-sep" aria-hidden="true">|</span>
       <button type="button" class="lobby-dock-item" data-lobby-action="tower">防御塔</button>
       <span class="lobby-dock-sep" aria-hidden="true">|</span>
@@ -282,24 +282,25 @@
           <h2>基本操作</h2>
           <ul>
             <li><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> — 移动</li>
-            <li><kbd>Shift</kbd> — 冲刺 · <kbd>Ctrl</kbd> — 蹲下（蹲下不能冲刺，头顶有障碍时松开也不会站起）</li>
+            <li><kbd>Shift</kbd> — 冲刺 · <kbd>C</kbd> — 切换下蹲 · <kbd>Ctrl</kbd> — 按住下蹲 · 冲刺中按下蹲滑铲（结束后保持蹲姿；头顶有障碍时无法起身）</li>
             <li><kbd>空格</kbd> — 跳跃 · 鼠标 — 视角 · <kbd>Esc</kbd> — 释放鼠标</li>
             <li><kbd>左键</kbd> — 射击 · <kbd>右键</kbd> — 瞄准（ADS，散布更小）</li>
-            <li><kbd>R</kbd> — 换弹 · <kbd>V</kbd> — 冲刺（准星方向） · <kbd>G</kbd> — 先锋 C4（按住瞄准） · <kbd>Q</kbd> — 投掷（滚轮切换种类） · <kbd>Tab</kbd> — 背包 · <kbd>M</kbd> — 大地图</li>
+            <li><kbd>R</kbd> — 换弹 · <kbd>V</kbd> — 冲刺（准星方向） · <kbd>G</kbd> — 先锋 C4（按住瞄准） · 滚轮 — 切换枪 / 刀 / 投掷物 · <kbd>Q</kbd> — 投掷（按住蓄力） · <kbd>Tab</kbd> — 背包 · <kbd>M</kbd> — 大地图</li>
             <li><kbd>E</kbd> — 拾取部署核 / 掩体建材 · <kbd>F</kbd> — 乘坐滑索</li>
           </ul>
         </section>
         <section class="tutorial-section">
-          <h2>武器栏（1–3）</h2>
+          <h2>装备栏</h2>
           <ul>
-            <li><kbd>1</kbd> AKM — 7.62×39mm，全自动中近距离压制</li>
-            <li><kbd>2</kbd> Remington 870 — 12ga 鹿弹，近距离高伤多弹丸</li>
-            <li><kbd>3</kbd> SVD — 7.62×54R，远距离高伤点杀</li>
+            <li><kbd>1</kbd> 主武器 — 突击步枪 / 卡宾枪 / 冲锋枪 / 轻机枪 / 精确射手 / 狙击枪</li>
+            <li><kbd>2</kbd> 副武器 — 霰弹枪 / 手枪</li>
+            <li><kbd>3</kbd> 战术匕首 — 仅无建造模式（死斗 / 混战 / 爆破）</li>
+            <li><kbd>Q</kbd> 投掷物 — 按住蓄力投掷，滚轮切换种类</li>
           </ul>
-          <p>第一人称会显示枪身与双手；跑步时枪会随步伐轻微摆动。击杀敌人掉落弹药箱，走近自动拾取。</p>
+          <p>具体带哪几件在大厅「装备」里配。第一人称会显示枪身与双手；跑步时枪会随步伐轻微摆动。击杀敌人掉落弹药箱，走近自动拾取。</p>
         </section>
         <section class="tutorial-section">
-          <h2>建造（4–5）</h2>
+          <h2>建造（4–5，仅核心攻防）</h2>
           <ul>
             <li><kbd>4</kbd> 掩体 — 消耗建材，摆放短墙</li>
             <li><kbd>5</kbd> 防御塔 — 消耗 1 个<strong>部署核</strong>（开局自带 1 个），放置你在大厅设计器里搭好的塔与滑索</li>
@@ -420,20 +421,6 @@
       <span class="sd-status-icons red" id="sd-status-red"></span>
     </div>
 
-    <!-- Health under minimap -->
-    <div id="vitals">
-      <div id="hp-row">
-        <span class="vital-label">生命</span>
-        <span id="hp-blocks">████████████████</span>
-        <span id="hp-num">100</span>
-      </div>
-      <div id="armor-row">
-        <span class="vital-label">护甲</span>
-        <span id="armor-blocks">████████</span>
-        <span id="armor-num">50</span>
-      </div>
-    </div>
-
     <!-- Legacy wave panel kept hidden (timer moved to match-clock) -->
     <div id="wave-info" class="hidden" aria-hidden="true">
       <div id="wave-label">战场</div>
@@ -487,6 +474,9 @@
       </div>
     </div>
 
+    <!-- Bottom right: skills above loadout -->
+    <div id="hud-br">
+    <div id="skill-row">
     <!-- Class skills: active + passive (vanguard / medic / ghost / juggernaut) -->
     <div id="skill-hud" class="hidden">
       <div class="skill-slot" id="skill-active" title="">
@@ -562,8 +552,63 @@
         <div class="skill-keybind skill-keybind-passive">被动</div>
       </div>
     </div>
+      <div id="dash-hud">
+        <div class="skill-slot" id="skill-dash" title="冲刺 — V · 沿准星方向三维突进（球形范围 · CD 10s）">
+          <div class="skill-icon-wrap">
+            <div class="skill-icon skill-icon-dash" aria-hidden="true">
+              <span class="dash-chev a"></span>
+              <span class="dash-chev b"></span>
+              <span class="dash-chev c"></span>
+            </div>
+            <div class="skill-cd-overlay hidden" id="dash-cd-overlay">
+              <span id="dash-cd-num"></span>
+            </div>
+          </div>
+          <div class="skill-keybind">V</div>
+        </div>
+      </div>
+    </div>
+    <div id="hotbar">
+        <div class="slot active" data-slot="1" title="AKM (1)">
+          <span class="slot-key">1</span>
+          <span class="slot-icon weapon-ar"></span>
+          <span class="slot-name">AKM</span>
+          <span class="slot-ammo">30/150</span>
+        </div>
+        <div class="slot" data-slot="2" title="Remington 870 (2)">
+          <span class="slot-key">2</span>
+          <span class="slot-icon weapon-sg"></span>
+          <span class="slot-name">870</span>
+          <span class="slot-ammo">7/35</span>
+        </div>
+        <div class="slot melee" data-slot="3" title="战术匕首 (3)">
+          <span class="slot-key">3</span>
+          <span class="slot-icon weapon-knife"></span>
+          <span class="slot-name">匕首</span>
+          <span class="slot-ammo">—</span>
+        </div>
+        <div class="slot throw" data-slot="throw" title="投掷物 (Q)">
+          <span class="slot-key">Q</span>
+          <span class="slot-icon nade-icon"></span>
+          <span class="slot-name">手雷</span>
+          <span class="slot-ammo">1</span>
+        </div>
+        <div class="slot build" data-slot="4" title="Cover / 掩体 (4)">
+          <span class="slot-key">4</span>
+          <span class="slot-icon cover-icon"></span>
+          <span class="slot-name">掩体</span>
+          <span class="slot-ammo"></span>
+        </div>
+        <div class="slot build" data-slot="5" title="防御塔 (5) — 消耗部署核">
+          <span class="slot-key">5</span>
+          <span class="slot-icon tower-b"></span>
+          <span class="slot-name">防御塔</span>
+          <span class="slot-ammo"></span>
+        </div>
+      </div>
+    </div>
 
-    <!-- Throwables (debug: unlimited + in-match swap). Same left-bottom icon language as skills. -->
+    <!-- Throwables (in-match type swap). Hidden from the dock; Q lives on the right loadout list. -->
     <div id="throw-hud" class="hidden" aria-label="投掷物">
       <button type="button" class="skill-slot throw-slot" data-throw-id="frag" title="破片手雷">
         <div class="skill-icon-wrap">
@@ -628,71 +673,41 @@
       </button>
     </div>
 
-    <!-- Bottom left: resources -->
-    <div id="resources">
-      <div class="res-row">
-        <span class="res-icon core"></span>
-        <span>部署核</span>
-        <strong id="core-count">0</strong>
-      </div>
-      <div class="res-row">
-        <span class="res-icon blocks"></span>
-        <span>掩体建材</span>
-        <strong id="block-count">0</strong>
-      </div>
-        <div id="interact-hint" class="hidden">按 <kbd>E</kbd> 拾取</div>
-    </div>
-
-    <!-- Bottom right: 5-slot hotbar -->
-    <div id="hotbar">
-      <div class="slot active" data-slot="1" title="AKM (1)">
-        <span class="slot-key">1</span>
-        <span class="slot-icon weapon-ar"></span>
-        <span class="slot-name">AKM</span>
-      </div>
-      <div class="slot" data-slot="2" title="Remington 870 (2)">
-        <span class="slot-key">2</span>
-        <span class="slot-icon weapon-sg"></span>
-        <span class="slot-name">870</span>
-      </div>
-      <div class="slot" data-slot="3" title="SVD (3)">
-        <span class="slot-key">3</span>
-        <span class="slot-icon weapon-sr"></span>
-        <span class="slot-name">SVD</span>
-      </div>
-      <div class="slot build" data-slot="4" title="Cover / 掩体 (4)">
-        <span class="slot-key">4</span>
-        <span class="slot-icon cover-icon"></span>
-        <span class="slot-name">掩体</span>
-      </div>
-      <div class="slot build" data-slot="5" title="防御塔 (5) — 消耗部署核">
-        <span class="slot-key">5</span>
-        <span class="slot-icon tower-b"></span>
-        <span class="slot-name">防御塔</span>
-      </div>
-    </div>
-
-    <!-- Universal dash (all classes) — above ammo -->
-    <div id="dash-hud">
-      <div class="skill-slot" id="skill-dash" title="冲刺 — V · 沿准星方向三维突进（球形范围 · CD 10s）">
-        <div class="skill-icon-wrap">
-          <div class="skill-icon skill-icon-dash" aria-hidden="true">
-            <span class="dash-chev a"></span>
-            <span class="dash-chev b"></span>
-            <span class="dash-chev c"></span>
-          </div>
-          <div class="skill-cd-overlay hidden" id="dash-cd-overlay">
-            <span id="dash-cd-num"></span>
-          </div>
+    <!-- Bottom left: vitals + ammo pips (doodle-style) -->
+    <div id="hud-bl">
+      <div id="vitals">
+        <div id="hp-row">
+          <span class="vital-label">生命</span>
+          <div class="vital-track hp" aria-hidden="true"><i id="hp-fill"></i></div>
+          <span id="hp-num">100</span>
         </div>
-        <div class="skill-keybind">V</div>
+        <div id="armor-row">
+          <span class="vital-label">护甲</span>
+          <div class="vital-track armor" aria-hidden="true"><i id="armor-fill"></i></div>
+          <span id="armor-num">50</span>
+        </div>
       </div>
-    </div>
-
-    <!-- Ammo readout near hotbar -->
-    <div id="ammo">
-      <span id="ammo-mag">45</span><span class="ammo-sep">/</span><span id="ammo-reserve">180</span>
-      <span id="ammo-reload" class="hidden">换弹</span>
+      <div id="ammo">
+        <div id="ammo-readout">
+          <span id="ammo-mag">30</span><span class="ammo-sep">/</span><span id="ammo-reserve">150</span>
+          <span id="ammo-mags" aria-hidden="true"></span>
+          <span id="ammo-reload" class="hidden">换弹</span>
+        </div>
+        <div id="ammo-pips" aria-hidden="true"></div>
+      </div>
+      <div id="resources">
+        <div class="res-row">
+          <span class="res-icon core"></span>
+          <span>部署核</span>
+          <strong id="core-count">0</strong>
+        </div>
+        <div class="res-row">
+          <span class="res-icon blocks"></span>
+          <span>掩体建材</span>
+          <strong id="block-count">0</strong>
+        </div>
+        <div id="interact-hint" class="hidden">按 <kbd>E</kbd> 拾取</div>
+      </div>
     </div>
   </div>
 
@@ -1056,19 +1071,25 @@
   <script src="js/gg-match.js"></script>
   <script src="js/gg-ui.js"></script>
   <script src="js/voxel-world.js"></script>
+  <script src="js/pve-district.js"></script>
   <script src="js/terrain-fine.js"></script>
   <script src="js/world-outskirts.js"></script>
   <script src="js/bases.js"></script>
   <script src="js/soldier.js"></script>
   <script src="js/player.js"></script>
+  <script src="js/weapon-catalog.js"></script>
+  <script src="js/weapon-viewmodels.js"></script>
   <script src="js/weapons.js"></script>
   <script src="js/melee.js"></script>
   <script src="js/skills.js"></script>
   <script src="js/throwables.js"></script>
+  <script src="js/weapon-inspect.js"></script>
   <script src="js/building.js"></script>
   <script src="js/tower-designer.js"></script>
   <script src="js/hub.js"></script>
   <script src="js/economy.js"></script>
+  <script src="js/career.js"></script>
+  <script src="js/arsenal.js"></script>
   <script src="js/lobby.js"></script>
   <script src="js/range.js"></script>
   <script src="js/ai.js"></script>

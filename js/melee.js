@@ -256,7 +256,8 @@
     const on = id === 'knife';
     if (player.gunNode) player.gunNode.visible = !on;
     if (player.rightArm) player.rightArm.visible = !on;
-    if (player.leftArm) player.leftArm.visible = !on;
+    // A one-handed gun keeps its support arm stowed.
+    if (player.leftArm) player.leftArm.visible = !on && !player._hideLeftArm;
     if (knife) knife.visible = !!on;
     if (player.muzzleFlash) player.muzzleFlash.visible = !on;
   }
@@ -269,6 +270,11 @@
   /**
    * Stab, not a chop: camera -Z is forward toward the crosshair.
    * Windup cocks the fist back; active drives it out; recovery returns.
+   *
+   * rest is the shoulder pivot (see createKnifeViewModel), which sits behind
+   * and right of the eye. Keeping it off-frame through the whole swing is what
+   * stops the limb from clearing the body and leaving the knife hanging in
+   * mid-air, so the forward slide is capped at what that anchor can absorb.
    */
   function applySlashPose(player, s, def) {
     const knife = player && player._knifeNode;
@@ -285,12 +291,14 @@
     } else if (s.phase === 'recovery') {
       thrust = 1 - _smooth(s.t / Math.max(0.001, def.recoveryTime));
     }
-    slashNode.position.x = rest.x + cock * 0.06 - thrust * 0.2;
-    slashNode.position.y = rest.y - cock * 0.05 + thrust * 0.14;
-    slashNode.position.z = rest.z + cock * 0.18 - thrust * 0.52;
-    slashNode.rotation.x = rest.rx + cock * 0.22 - thrust * 0.28;
-    slashNode.rotation.y = rest.ry - cock * 0.08 - thrust * 0.32;
-    slashNode.rotation.z = rest.rz + cock * 0.1 - thrust * 0.45;
+    // Windup cocks up and inward, never down: dropping the fist swings the
+    // blade clean out of frame and the knife appears to blink out mid-swing.
+    slashNode.position.x = rest.x + cock * 0.07 - thrust * 0.16;
+    slashNode.position.y = rest.y + cock * 0.06 + thrust * 0.12;
+    slashNode.position.z = rest.z + cock * 0.16 - thrust * 0.5;
+    slashNode.rotation.x = rest.rx + cock * 0.04 + thrust * 0.04;
+    slashNode.rotation.y = rest.ry + cock * 0.16 + thrust * 0.13;
+    slashNode.rotation.z = rest.rz - cock * 0.12 - thrust * 0.13;
   }
 
   function applyLunge(weapons, player, dt) {

@@ -1,0 +1,1468 @@
+function vr(n,t=!1){
+let{
+L:e,box:s,slab:i,wallX:o,wallZ:a,stairs:l,rail:r,cyl:c,sphere:h,ring:d,spawn:f,sniper:g,pickup:v,planes:T,addGeo:M,collider:O
+}
+=n,b=t?68:55,S=6,L=t?30:18,V=b-3.8,P=b-3;
+if(e.bounds.minX=-b,e.bounds.maxX=b,e.bounds.minZ=-b,e.bounds.maxZ=b,s(0,-1,0,2*b+S,1,2*b+S),s(0,0,-b,2*b+S,L,S),s(0,0,b,2*b+S,L,S),s(-b,0,0,S,L,2*b+S),s(b,0,0,S,L,2*b+S),!t){
+let x={
+noNav:!0,noGrapple:!0
+}
+;
+O(0,L,-b,2*b+S,40,S,x),O(0,L,b,2*b+S,40,S,x),O(-b,L,0,S,40,2*b+S,x),O(b,L,0,S,40,2*b+S,x),O(0,56,0,2*b+40,8,2*b+40,x);
+let I=96,q=-22;
+for(let K=0;
+K<6;
+K++){
+let N=new w.TorusGeometry(I,.5,5,80,Math.PI);
+N.rotateY(K*Math.PI/6),N.translate(0,q,0),M(N,k.BLUE)
+}
+for(let K of[30,46,60,70]){
+let N=Math.sqrt(I*I-(K-q)*(K-q)),$=new w.TorusGeometry(N,.4,5,96);
+$.rotateX(Math.PI/2),$.translate(0,K,0),M($,k.BLUE)
+}
+
+}
+let Z=[[-30,-V,8,1.6],[30,-V,8,1.6],[-V,40,1.6,8],[V,-10,1.6,8],[-V,-30,1.6,6],[V,35,1.6,6],[10,V,8,1.6],[-40,V,6,1.6]];
+for(let[x,I,q,K]of Z)s(x,9,I,q,.4,K),s(x,5.5,I,q,.4,K),t&&(s(x,16,I,q,.4,K),d(x,20,I,"y"));
+let it=(x,I,q)=>{
+q?(s(x-1.2,0,I,.3,3.2,.5,{
+noCollide:!0,ink:k.BLACK
+}
+),s(x+1.2,0,I,.3,3.2,.5,{
+noCollide:!0,ink:k.BLACK
+}
+),s(x,3,I,2.7,.3,.5,{
+noCollide:!0,ink:k.BLACK
+}
+)):(s(x,0,I-1.2,.5,3.2,.3,{
+noCollide:!0,ink:k.BLACK
+}
+),s(x,0,I+1.2,.5,3.2,.3,{
+noCollide:!0,ink:k.BLACK
+}
+),s(x,3,I,.5,.3,2.7,{
+noCollide:!0,ink:k.BLACK
+}
+))
+}
+;
+for(let[x,I]of[[-P,0],[P,0],[-P,30],[P,-30],[-P,-30],[P,30]])it(x,I,!1),f(x+(x<0?1.2:-1.2),0,I);
+for(let[x,I]of[[0,-P],[0,P],[-30,P],[30,P]])it(x,I,!0),f(x,0,I+(I<0?1.2:-1.2));
+if(t){
+for(let[G,Y,X]of[[-34,12.2,12],[34,12.2,12],[-30,7.2,-45],[16,7.2,-45],[0,7.4,-30],[-44,0,-10],[44,0,-10],[-40,0,40],[40,0,40],[0,0,55],[-58,0,0],[58,0,0],[0,0,-58],[-54,0,54],[54,0,-54]])e.arenaSpawns.push(new w.Vector3(G,Y,X));
+s(-8,0,20,3,1,1.2),s(10,0,26,1.4,1.2,1.4),s(-12,0,-8,2.4,.8,2.4),s(14,0,-4,2.4,.8,2.4);
+for(let[G,Y]of[[-56,30],[56,-30],[30,-56],[-30,56]])s(G,0,Y,.3,7,.3,{
+noNav:!0
+}
+),s(G,7,Y,1.4,.3,.3,{
+noCollide:!0
+}
+),M(new w.SphereGeometry(.45,8,6).translate(G+.7,6.8,Y),k.ORANGE);
+let x=120,I=-30,q=(G,Y)=>Math.sqrt(Math.max(1,x*x-G*G-Y*Y))+I;
+for(let G=0;
+G<8;
+G++){
+let Y=new w.TorusGeometry(x,.6,5,96,Math.PI);
+Y.rotateY(G*Math.PI/8),Y.translate(0,I,0),M(Y,k.BLUE)
+}
+for(let G of[38,54,68,80,88]){
+let Y=Math.sqrt(x*x-(G-I)*(G-I)),X=new w.TorusGeometry(Y,.5,5,128);
+X.rotateX(Math.PI/2),X.translate(0,G,0),M(X,k.BLUE)
+}
+M(new w.SphereGeometry(2.4,10,8).translate(0,x+I,0),k.RED);
+let K={
+noNav:!0,noGrapple:!0
+}
+;
+O(0,88,0,300,10,300,K);
+for(let G=L;
+G<88;
+G+=4){
+let Y=Math.sqrt(Math.max(0,x*x-(G+4-I)**2));
+if(Y>b+S)continue;
+let X=Y+80;
+O(0,G,-X,320,4,160,K),O(0,G,X,320,4,160,K),O(-X,G,0,160,4,320,K),O(X,G,0,160,4,320,K)
+}
+let N=(G,Y,X)=>s(G,Y,X,.12,Math.max(1,q(G,X)-Y),.12,{
+noCollide:!0,ink:k.BLACK
+}
+),$=(G,Y,X,at,dt)=>{
+s(G,Y,X,at,.5,dt,{
+noNav:!0
+}
+),N(G,Y+.5,X),d(G,Y-1.3,X,"y")
+}
+;
+for(let[G,Y,X,at,dt]of[[0,24,0,8,8],[-42,18,-24,6,6],[44,21,30,6,6],[28,27,-46,5,5],[-30,30,44,5,5]])$(G,Y,X,at,dt);
+T(4,30,26,{
+scale:1.7,rStep:9,hStep:6,speed:.11,ink:k.BLUE
+}
+)
+}
+if(!t){
+for(let N=1;
+N<=4;
+N++)i(-7,-7,7,7,N*4,.4);
+for(let[N,$]of[[-6.6,-6.6],[6.6,-6.6],[-6.6,6.6],[6.6,6.6],[0,-6.6],[0,6.6],[-6.6,0],[6.6,0]])s(N,0,$,.8,16,.8);
+for(let N=1;
+N<=3;
+N++){
+let $=N*4;
+r(-7,7,-1.5,7,$),r(1.5,7,7,7,$),r(-7,-7,7,-7,$),r(7,-7,7,7,$),r(-7,-7,-6.5,-7,$),r(3.5,-7,7,-7,$)
+}
+r(-5,-7,7,-7,16),r(-7,7,-1.5,7,16),r(1.5,7,7,7,16),r(-7,-7,-7,7,16),r(7,-7,7,3,16),s(5.5,16,5.5,1,10,1),s(5.5,25.2,5.5,1.6,1.4,1.6,{
+noCollide:!0
+}
+),s(11.5,25,5.5,16,.8,.8),s(1,25,5.5,5,.8,.8),s(-.5,23.6,5.5,2,1.6,1.6),s(19,20.5,5.5,.08,4.6,.08,{
+noCollide:!0,ink:k.BLACK
+}
+),d(19,19.8,5.5,"x"),d(19.5,24.6,5.5,"z");
+let K=0;
+for(let N=0;
+N<4;
+N++){
+let $=N%2===0?"+x":"-x",G=$==="+x"?-5:1.3,Y=N%2===0?-8.3:-10.3;
+l(G,K,Y,$,14,1.8),K+=4;
+let X=$==="+x"?2.4:-6.1;
+i(X-1.1,-11.4,X+1.1,-7,K,.4),r(X-1.1,-11.4,X+1.1,-11.4,K)
+}
+f(0,8,0),f(0,4,3),g(0,16,-3),v(0,12,0),v(-4,8,4),v(0,16,0)
+}
+{
+for(let G=1;
+G<=3;
+G++)i(-43,4,-25,20,G*4,.4);
+a(4,20,-25,0,12,.4,[[10,13,0,3.2],[6,9,5,7],[14,17,5,7],[6,9,9,11],[14,17,9,11]]),a(4,20,-43,0,12,.4,[[8,11,0,3.2],[8,11,4.5,7.5],[8,11,8.5,11.5]]),o(-43,-25,4,0,12,.4,[[-36,-33,0,3.2],[-40,-37,5,7],[-31,-28,5,7],[-36,-32,8.5,11.5]]),o(-43,-25,20,0,12,.4,[[-36,-32,0,3.2],[-31,-27,0,3.2],[-42,-39,0,3.2],[-37.2,-33.5,4.05,7.2],[-36,-32,8.4,11.4],[-41,-27,4.6,7.6],[-29,-25.5,8.05,11.2]]),o(-43,-25,12,0,4,.3,[[-40,-37.5],[-30,-27.5]]),o(-43,-25,12,4,4,.3,[[-36,-32]]),a(4,20,-34,8,4,.3,[[8,11],[14,17]]),r(-43,4,-37,4,12),r(-31,4,-25,4,12),r(-43,20,-37.4,20,12),r(-34.4,20,-25,20,12),r(-43,4,-43,20,12),r(-25,4,-25,9,12),r(-25,15,-25,20,12);
+let $=0;
+for(let G=0;
+G<3;
+G++){
+let Y=G%2===0?"-x":"+x",X=Y==="-x"?-28.5:-34.8,at=G%2===0?21.2:23.2;
+l(X,$,at,Y,14,1.8),$+=4;
+let dt=Y==="-x"?-35.9:-27.4;
+i(dt-1.1,20.2,dt+1.1,24.4,$,.4),r(dt-1.1,24.4,dt+1.1,24.4,$)
+}
+{
+let G=t?24.2:-7,Y=G+25.2;
+s((G-25.2)/2,11.6,6,Y,.4,2.4,{
+ink:k.ORANGE
+}
+);
+for(let X=0;
+X<=Math.floor(Y);
+X++)s(-25+X,12,5,.06,.02,X%5===0?.6:.35,{
+noCollide:!0,ink:k.BLACK
+}
+);
+r(-25,7.2,G,7.2,12,{
+ink:k.ORANGE
+}
+),t&&r(-25,4.8,G,4.8,12,{
+ink:k.ORANGE
+}
+)
+}
+f(-34,12,12),f(-40,0,18),g(-27,12,6),v(-34,4,12),v(-30,12,16),v(-40,8,8)
+}
+{
+i(24,4,44,9,12,.4),i(24,15,44,20,12,.4),i(24,9,31,15,12,.4),i(37,9,44,15,12,.4),a(4,20,24,0,12,.4,[[10,14,0,3.6],[6,9,7,10],[15,18,7,10]]),a(4,20,44,0,12,.4,[[7,10,0,3.2],[14,17,0,3.2],[8,16,7,10]]),o(24,44,4,0,12,.4,[[32,36,0,3.6],[27,30,7,10],[38,41,7,10]]),o(24,44,20,0,12,.4,[[26,29,0,3.2],[39,42,0,3.2],[33.5,36.5,4.05,7.2],[25.5,28.5,8.05,11.2],[32,36,8,11]]),i(24+.4,4+.4,26,20-.4,6,.3),i(42,4+.4,44-.4,20-.4,6,.3),i(26,4+.4,42,6,6,.3),i(26,18,42,20-.4,6,.3),r(26,6,26,9,6),r(26,15,26,17,6),r(42,6,42,18,6),r(26,6,31,6,6),r(37,6,42,6,6),r(26,18,42,18,6),l(26.2,0,8.6,"+z",21,1.6,{
+rise:6/21,run:.45
+}
+),s(34,0,12,2.4,2.4,2.4),s(36.4,0,12,2.4,1.2,2.4),s(30,0,16,1.6,1.6,1.6,{
+ink:k.GREEN
+}
+);
+let N=0;
+for(let $=0;
+$<3;
+$++){
+let G=$%2===0?"+x":"-x",Y=G==="+x"?27.5:33.8,X=$%2===0?21.2:23.2;
+l(Y,N,X,G,14,1.8),N+=4;
+let at=G==="+x"?34.9:26.4;
+i(at-1.1,20.2,at+1.1,24.4,N,.4),r(at-1.1,24.4,at+1.1,24.4,N)
+}
+r(24,4,31,4,12),r(37,4,44,4,12),r(24,20,33.4,20,12),r(36.4,20,44,20,12),r(44,4,44,20,12),r(24,4,24,9,12),r(24,15,24,20,12),s(15.5,11.6,6,17.4,.4,2.2),r(7,4.9,24,4.9,12),f(34,12,18),f(40,0,8),g(26,12,18),v(34,0,12),v(34,6,19),v(42,12,6)
+}
+{
+i(-52,-30-4.5,52,-30+4.5,7,.6),o(-52,52,-30-4.3,7,.9,.4,[[-33,-29],[27,31],[-2,2]]),o(-52,52,-30+4.3,7,.9,.4,[[-36.5,-33],[33,36.5]]);
+for(let q=-48;
+q<=48;
+q+=12)s(q,0,-30,1.4,6.4,1.4);
+l(-46.5,0,-30+5.5,"+x",25,2,{
+rise:.28,run:.45
+}
+),l(46.5,0,-30+5.5,"-x",25,2,{
+rise:.28,run:.45
+}
+);
+for(let q=-50;
+q<50;
+q+=4)s(q+1,7,-30,2,.02,.2,{
+noCollide:!0,ink:k.BLACK
+}
+);
+f(-48,7,-30),f(48,7,-30),g(0,7,-30),v(-10,7,-30),v(24,7,-30)
+}
+if(s(-30,0,-45,14,7,10),s(-8,0,-45,14,11,10),s(16,0,-45,14,7,10),s(-31,6.7,-37.25,2.6,.3,5.5),s(29,6.7,-37.25,2.6,.3,5.5),s(0,6.7,-37.25,2.6,.3,5.5),r(-32.3,-40,-32.3,-34.5,7),r(-29.7,-40,-29.7,-34.5,7),r(27.7,-40,27.7,-34.5,7),r(30.3,-40,30.3,-34.5,7),l(-23,7,-45,"+x",14,2.2),i(-16.9,-45-1.1,-15,-45+1.1,11,.4),l(9,7,-45,"-x",14,2.2),i(-1,-45-1.1,2.9,-45+1.1,11,.4),s(-33,7,-48,1.2,1.6,1.2),s(19,7,-42,1.2,1.4,1.2),c(-10,11,-45-2.5,1.4,2.6,{
+seg:14
+}
+),s(-5,11,-42,.1,4,.1,{
+noCollide:!0,ink:k.BLACK
+}
+),f(-8,11,-45),f(-30,7,-48),f(16,7,-45),g(-8,11,-48),g(16,7,-43),v(-8,11,-43),v(-30,7,-45),!t){
+s(-14,0,34,2.5,2.6,6.2,{
+ink:k.GREEN
+}
+),s(-14,2.6,34,2.5,2.6,6.2,{
+ink:k.ORANGE
+}
+),s(14,0,36,6.2,2.6,2.5),s(17,2.6,36,3,2.6,2.5,{
+ink:k.GREEN
+}
+),s(-6,0,28,1.4,1.4,1.4),s(-4.5,0,28.5,1.2,1.2,1.2),s(-5.3,1.4,28.2,1,1,1),s(8,0,26,1.6,1.6,1.6),s(9.6,0,26.4,1.2,1.2,1.2),s(24,.6,40,11,3.2,2.8),s(24,0,40,10,.6,2.6,{
+noCollide:!0
+}
+);
+for(let x of[20,28])c(x,0,41.5,.55,.4,{
+noCollide:!0,seg:10,ink:k.BLACK
+}
+),c(x,0,38.5,.55,.4,{
+noCollide:!0,seg:10,ink:k.BLACK
+}
+);
+{
+let x=new w.CylinderGeometry(.8,.8,16,6);
+x.rotateZ(Math.PI/2),x.translate(-30,.8,44),M(x,k.ORANGE),O(-30,0,44,16,1.6,1.6);
+let I=new w.ConeGeometry(.8,2.4,6);
+I.rotateZ(-Math.PI/2),I.translate(-20.8,.8,44),M(I,k.BLACK),O(-20.8,0,44,2.4,1.6,1.6);
+let q=new w.CylinderGeometry(.82,.82,1.6,8);
+q.rotateZ(Math.PI/2),q.translate(-38.8,.8,44),M(q,k.PINK),O(-38.8,0,44,1.6,1.64,1.64)
+}
+s(38,0,40,6,2.2,3.2,{
+ink:k.PINK
+}
+),s(38,2.2,40,6,.8,3.2,{
+ink:k.BLUE
+}
+),c(-40,0,32,2.6,3.4,{
+seg:16
+}
+);
+{
+let x=new w.TorusGeometry(1.4,.35,8,16);
+x.translate(-36.6,1.8,32),M(x,k.BLUE)
+}
+for(let[x,I]of[[-10,46],[10,46],[-22,24],[22,24]])s(x,0,I,.25,6,.25),s(x,6,I,1.4,.3,.5,{
+noCollide:!0
+}
+);
+for(let[x,I]of[[-4,46],[4,46]])s(x,.4,I,3,.15,.6),s(x,0,I,2.6,.4,.2,{
+noCollide:!0
+}
+);
+v(-6,0,36),v(6,0,36),v(-30,1.6,44),v(38,3,40),v(0,0,10),s(-16,0,-8,2.2,1.2,2.2),s(18,0,-10,2.2,1.6,2.2),s(-20,0,8,1.6,1,3),s(20,0,-2,3,1,1.6),s(-8,0,-18,4,1.1,1.2),s(8,0,-18,4,1.1,1.2),s(0,0,22,5,.5,1.4),s(-24,0,-18,2.4,2.6,2.4,{
+ink:k.ORANGE
+}
+),s(26,0,-18,2.4,2.6,2.4,{
+ink:k.GREEN
+}
+)
+}
+{
+h(-90,110,-160,12,{
+seg:12
+}
+);
+for(let x=0;
+x<12;
+x++){
+let I=x/12*Math.PI*2,q=new w.BoxGeometry(6,.7,.7);
+q.rotateZ(I),q.translate(-90+Math.cos(I)*19,110+Math.sin(I)*19,-160),M(q,k.BLUE)
+}
+for(let[x,I,q,K]of[[60,70,-170,1],[-20,75,-190,1.3],[140,60,-80,.9],[-150,65,40,1.1],[30,80,180,1.2],[-90,60,170,.8]])for(let N=0;
+N<6;
+N++)h(x+(N-2.5)*5*K,I+Math.sin(N*1.7)*2.5*K,q,(4+N%3)*K,{
+seg:10
+}
+)
+}
+return e.teamSpawns=[[-40,0,18],[-34,12,12],[-48,7,-30],[-52,0,30],[-30,7,-48]].map(([x,I,q])=>new w.Vector3(x,I,q)),e.teamSpawns=[e.teamSpawns,[[40,0,8],[34,12,18],[48,7,-30],[52,0,30],[16,7,-45]].map(([x,I,q])=>new w.Vector3(x,I,q))],t||T(3,30,30,{
+rStep:8,hStep:6,scale:1.4
+}
+),n.finish()
+}
+function Er(n,t=!1){
+let{
+L:e,box:s,slab:i,stairs:o,rail:a,cyl:l,sphere:r,ring:c,spawn:h,sniper:d,pickup:f,planes:g,addGeo:v,collider:T,scene:M,breakable:O
+}
+=n,b=k.ORANGE,S=k.GREEN,L=k.PINK,V=k.BLACK,P=k.BLUE;
+e.key="mexico",e.playerStart.set(0,0,16);
+let Z=62;
+e.bounds={
+minX:-Z,maxX:Z,minZ:-Z,maxZ:Z
+}
+;
+let it=(R,j=!1)=>gt({
+ink:R,fill:j,side:j?w.DoubleSide:w.FrontSide
+}
+),x=(R,j,W=!1)=>new w.Mesh(R,it(j,W)),I=(R,j,W=!1)=>O("pot",R,0,j,W?1.2:.9,W?1.3:.9,W?1.2:.9,U=>{
+let kt=W?.55:.4,et=W?1.2:.85;
+U.add(x(new w.CylinderGeometry(kt*.75,kt,et,9).translate(0,et/2,0),b)),U.add(x(new w.TorusGeometry(kt*.72,.05,5,12).rotateX(Math.PI/2).translate(0,et,0),V)),U.add(x(new w.TorusGeometry(kt*.98,.04,4,12).rotateX(Math.PI/2).translate(0,et*.45,0),L))
+}
+,{
+hp:1,ink:b
+}
+),q=(R,j)=>O("crate",R,0,j,1.1,1.1,1.1,W=>{
+W.add(x(new w.BoxGeometry(1.1,1.1,1.1).translate(0,.55,0),P));
+for(let U of[-1,1])W.add(x(new w.BoxGeometry(1.14,.12,.12).translate(0,.55+U*.35,.56),V))
+}
+,{
+hp:30,ink:P
+}
+),K=(R,j)=>O("barrel",R,0,j,1.1,1.2,1.1,W=>{
+W.add(x(new w.CylinderGeometry(.5,.45,1.2,10).translate(0,.6,0),b));
+for(let U of[.25,.95])W.add(x(new w.TorusGeometry(.5,.04,4,14).rotateX(Math.PI/2).translate(0,U,0),V))
+}
+,{
+hp:30,ink:b
+}
+),N=(R,j,W=2.6)=>O("cactus",R,0,j,.9,W,.9,U=>{
+U.add(x(new w.CylinderGeometry(.28,.34,W,8).translate(0,W/2,0),S)),U.add(x(new w.CylinderGeometry(.16,.18,.9,7).translate(.6,W*.55,0),S)),U.add(x(new w.CylinderGeometry(.17,.17,.7,7).rotateZ(Math.PI/2).translate(.35,W*.38,0),S)),U.add(x(new w.CylinderGeometry(.14,.16,.7,7).translate(-.55,W*.7,0),S)),U.add(x(new w.CylinderGeometry(.15,.15,.6,7).rotateZ(Math.PI/2).translate(-.3,W*.55,0),S)),U.add(x(new w.SphereGeometry(.16,6,5).translate(0,W+.05,0),L))
+}
+,{
+hp:40,ink:S
+}
+),$=(R,j,W)=>O("pinata",R,j,W,1.1,.9,.6,U=>{
+U.add(x(new w.BoxGeometry(.9,.5,.45).translate(0,.55,0),L));
+for(let kt of[-.3,0,.3])U.add(x(new w.BoxGeometry(.1,.52,.47).translate(kt,.55,0),kt?S:b));
+U.add(x(new w.BoxGeometry(.34,.3,.3).translate(.6,.72,0),L)),U.add(x(new w.BoxGeometry(.1,.22,.08).translate(.62,.95,.1),b)),U.add(x(new w.BoxGeometry(.1,.22,.08).translate(.62,.95,-.1),b));
+for(let[kt,et]of[[-.3,.15],[-.3,-.15],[.3,.15],[.3,-.15]])U.add(x(new w.BoxGeometry(.12,.34,.12).translate(kt,.15,et),L));
+U.add(x(new w.BoxGeometry(.03,2.2,.03).translate(0,1.85,0),V))
+}
+,{
+hp:1,ink:L
+}
+);
+s(0,-1,0,2*Z+10,1,2*Z+10);
+let G=(R,j,W,U)=>{
+s(R,0,j,W,11,U),s(R+p(-1.2,1.2),11,j+p(-1.2,1.2),W*.78,7,U*.78),s(R+p(-1,1),18,j+p(-1,1),W*.5,5,U*.5)
+}
+;
+for(let R=-2;
+R<=2;
+R++)G(R*24,-Z,19,8),G(R*24,Z,19,8),G(-Z,R*24,8,19),G(Z,R*24,8,19);
+for(let R=-2;
+R<2;
+R++)h(R*24+12,0,-Z+5),h(R*24+12,0,Z-5),h(-Z+5,0,R*24+12),h(Z-5,0,R*24+12);
+T(0,62,0,2*Z+40,6,2*Z+40,{
+noNav:!0,noGrapple:!0
+}
+),i(-24,-24,24,24,.15,.15),l(0,0,0,5.5,1.1),l(0,1.1,0,1.2,2.6),l(0,3.7,0,2.4,.5),r(0,5.4,0,.7,{
+ink:P
+}
+),c(0,7.2,0,"y"),v(new w.CylinderGeometry(5.1,5.1,.08,20).translate(0,1.1,0),P);
+for(let R=0;
+R<8;
+R++){
+let j=R/8*vt;
+v(new w.CylinderGeometry(.06,.06,2.6,5).rotateZ(.35).rotateY(j).translate(Math.cos(j)*1.7,5,Math.sin(j)*1.7),P)
+}
+l(0,13,0,8,.45,{
+ink:b
+}
+),l(0,13.45,0,3.2,3,{
+ink:b
+}
+),v(new w.CylinderGeometry(3.3,3.3,.5,16).translate(0,13.9,0),L);
+for(let R=0;
+R<6;
+R++){
+let j=R/6*vt;
+c(Math.cos(j)*7.2,12.2,Math.sin(j)*7.2,"y")
+}
+c(0,17.5,0,"y"),l(0,0,-26,6.5,1.2),o(0,0,-19.5,"-z",4,4.5,{
+rise:.3,run:.5
+}
+);
+for(let R=0;
+R<8;
+R++){
+let j=R/8*vt+Math.PI/8;
+l(Math.cos(j)*5.6,1.2,-26+Math.sin(j)*5.6,.22,4.2,{
+noCollide:!0,ink:b
+}
+)
+}
+v(new w.ConeGeometry(7.6,3.2,8).translate(0,7,-26),b),T(0,5.4,-26,9,.5,9,{
+noNav:!0
+}
+),v(new w.CylinderGeometry(7.6,7.6,.3,8).translate(0,5.55,-26),P),c(0,9.4,-26,"y");
+let Y=(R,j,W,U)=>{
+let kt=Os(gt({
+ink:V,shadeScale:0,shadeBias:1
+}
+),gt({
+ink:V,fill:!0,side:w.DoubleSide
+}
+),{
+weapon:"rifle",scale:1,hat:"none",build:{
+bodyW:1.05,headS:1,limbR:.034
+}
+
+}
+),et=kt.J;
+for(;
+et.gun.children.length;
+)et.gun.remove(et.gun.children[0]);
+let xt=new w.Group;
+xt.add(x(new w.CylinderGeometry(.62,.62,.05,14),b),x(new w.CylinderGeometry(.22,.26,.28,10).translate(0,.16,0),b),x(new w.TorusGeometry(.24,.03,4,12).rotateX(Math.PI/2).translate(0,.06,0),L)),xt.position.y=.5,et.headG.add(xt),U?(et.gun.add(x(new w.BoxGeometry(.34,.12,.5).translate(0,.02,.05),b),x(new w.BoxGeometry(.06,.05,.7).translate(0,.06,.55),V)),et.armR.rotation.x=-.9,et.armL.rotation.x=-1,et.armL.rotation.y=.5,et.foreL.rotation.x=-.9):(et.gun.add(x(new w.CylinderGeometry(.035,.035,.55,7).rotateX(Math.PI/2).translate(0,.02,.25),b),x(new w.CylinderGeometry(.14,.05,.16,8).rotateX(Math.PI/2).translate(0,.02,.55),b)),et.armR.rotation.x=-1.6,et.armL.rotation.x=-1.5,et.armL.rotation.y=.4,et.foreL.rotation.x=-.4,et.headG.rotation.x=-.25),kt.root.position.set(R,1.2,j),kt.root.rotation.y=W,M.add(kt.root),e.meshes.push(kt.root),e.animated.push({
+mesh:kt.root,update:Mt=>{
+let jt=Math.sin(Mt*6+R);
+kt.root.position.y=1.2+Math.max(0,jt)*.08,et.hips.parent.rotation.z=jt*.04,U?et.foreR.rotation.x=-.5+Math.sin(Mt*9+R)*.25:et.headG.rotation.z=Math.sin(Mt*4+R)*.08
+}
+
+}
+)
+}
+;
+Y(-2.6,-27.5,.4,!0),Y(0,-28.5,0,!1),Y(2.6,-27.5,-.4,!0),s(0,0,44,24,11,16),s(0,11,44,24,1.6,4.5),s(0,12.6,44,3,1.2,3),s(0,13.8,44,.3,2.2,.3),s(0,15.2,44,1.4,.3,.3),i(-7,33.5,7,36.5,.8,.8),s(-3.2,0,35.8,.5,5.4,.5,{
+noCollide:!0,ink:V
+}
+),s(3.2,0,35.8,.5,5.4,.5,{
+noCollide:!0,ink:V
+}
+),v(new w.TorusGeometry(3.2,.25,6,16,Math.PI).translate(0,5.4,35.8),V);
+for(let R of[-8,8])for(let j of[3,7])s(R,j,35.9,1.6,2.2,.3,{
+noCollide:!0,ink:V
+}
+);
+s(-10,0,46,6,26,6);
+for(let[R,j]of[[-2.5,-2.5],[2.5,-2.5],[-2.5,2.5],[2.5,2.5]])s(-10+R,26,46+j,.6,4,.6);
+s(-10,30,46,7.2,.6,7.2),s(-10,30.6,46,.3,3,.3),s(-10,32.4,46,1.6,.3,.3),r(-10,28.2,46,.95,{
+ink:b
+}
+),c(-10,27.4,42.2,"y"),c(-10,33.8,46,"y");
+for(let R of[8,15,21])s(-10,R,42.4,6,.4,1.3,{
+ink:b
+}
+),s(-13.6,R+3,46,1.3,.4,6,{
+ink:b
+}
+);
+s(10,0,46,6,15,6),r(10,17.4,46,3.6,{
+ink:b
+}
+),T(10,15,46,6,5,6,{
+noNav:!0
+}
+),s(10,20.8,46,.3,2,.3),c(10,21.6,46,"y");
+for(let R of[6,11])s(13.6,R,46,1.3,.4,6,{
+ink:b
+}
+);
+let X=(R,j,W,U,kt,et,xt)=>{
+s(R,0,j,W,kt,U),s(R,kt,j,W+.6,.35,U+.6,{
+ink:b
+}
+),a(R-W/2,j-U/2,R+W/2,j-U/2,kt+.35,{
+ink:b
+}
+);
+let Mt=xt*(W/2+.01);
+s(R+Mt,0,j,.15,2.6,1.4,{
+noCollide:!0,ink:et
+}
+),s(R+Mt,2.6,j,.15,.3,1.8,{
+noCollide:!0,ink:V
+}
+);
+for(let ce of[j-U*.32,j+U*.32])s(R+Mt,1.6,ce,.12,1.1,1.1,{
+noCollide:!0,ink:V
+}
+);
+let jt=Math.round(kt/.3);
+o(R-xt*(W/2+.3),0,j+U/2+.9,xt>0?"+x":"-x",jt,1.6,{
+rise:kt/jt,run:.42
+}
+),s(R,kt+.35,j+U/2-1.2,2.2,.9,1.4,{
+ink:b
+}
+),c(R,kt+3.2,j,"y")
+}
+;
+X(-40,-20,11,9,6,S,1),X(-40,-4,9,8,5,L,1),X(-40,14,12,10,7.5,b,1),X(40,-18,12,9,7,L,-1),X(40,0,9,8,5.5,S,-1),X(40,16,11,10,6.5,b,-1);
+let at=(R,j,W,U,kt,et,xt)=>{
+for(let Mt=0;
+Mt<=xt;
+Mt++){
+let jt=Mt/xt,ce=R+(U-R)*jt,ts=j+(kt-j)*jt-Math.sin(jt*Math.PI)*1.2,Lt=W+(et-W)*jt;
+if(Mt<xt){
+let Cs=(U-R)/xt,ye=(et-W)/xt;
+v(new w.BoxGeometry(Math.hypot(Cs,ye)+.05,.05,.05).rotateY(-Math.atan2(ye,Cs)).translate(ce+Cs/2,ts,Lt+ye/2),V)
+}
+Mt%2===1&&v(new w.BoxGeometry(.7,.55,.02).rotateY(-Math.atan2(et-W,U-R)).translate(ce,ts-.32,Lt),[L,S,b][Mt%3]),Mt===Math.floor(xt/2)&&c(ce,ts-1.2,Lt,"y")
+}
+
+}
+;
+at(-34.5,6.4,-20,-8,30.6,42,22),at(34.5,7.4,-18,8,21.2,42,22),at(-34.5,5.4,-4,34.5,5.9,0,26),at(-34.5,7.9,14,34.5,6.9,16,26);
+let dt=(R,j,W,U,kt)=>{
+s(R,0,j,W,.9,U);
+for(let[et,xt]of[[-1,-1],[1,-1],[-1,1],[1,1]])s(R+et*(W/2-.15),0,j+xt*(U/2-.15),.14,2.9,.14,{
+noCollide:!0,ink:V
+}
+);
+for(let et=0;
+et<5;
+et++)v(new w.BoxGeometry(W+.6,.06,(U+.6)/5).translate(R,2.95,j-(U+.6)/2+(et+.5)*(U+.6)/5),et%2?L:b);
+T(R,2.9,j,W+.6,.12,U+.6,{
+noNav:!0
+}
+)
+}
+;
+dt(-20,22,4.5,2.4),dt(-13,22,4.5,2.4),dt(20,22,4.5,2.4),dt(13,22,4.5,2.4),dt(-24,-12,2.4,4.5),dt(26,-8,2.4,4.5),$(-20,1.3,22),$(13,1.3,22),$(-24,1.3,-12),$(26,1.3,-8),$(0,6.4,8),$(-9,9.5,12),$(9,9.5,12);
+for(let[R,j]of[[-17.5,24.5],[-9.5,24.5],[16.5,24.5],[23.5,24.5],[-27.5,-9],[-27.5,-15],[29,-5],[29,-11]])q(R,j);
+for(let[R,j]of[[-33,-14],[-33,-12.6],[-33,-6],[-33,10],[-33,20],[33,-12],[33,-3],[33,6],[33,22],[-6,30],[6,30],[-18,31],[18,31],[-3,-33],[3,-33]])I(R,j,Math.random()<.3);
+for(let[R,j]of[[-18,-30],[18,-30],[-30,30],[30,30]])K(R,j);
+s(24,0,4,3.2,1.3,1.6,{
+ink:b
+}
+),s(24,1.3,4,3.4,.9,1.8,{
+ink:P
+}
+),s(22.5,0,4,.14,3.6,.14,{
+noCollide:!0,ink:V
+}
+),s(25.5,0,4,.14,3.6,.14,{
+noCollide:!0,ink:V
+}
+);
+for(let R=0;
+R<4;
+R++)v(new w.BoxGeometry(3.6,.06,.55).translate(24,3.62,3+R*.55),R%2?S:b);
+v(new w.CylinderGeometry(.34,.34,.14,12).rotateZ(Math.PI/2).translate(23.1,.34,3.1),V),v(new w.CylinderGeometry(.34,.34,.14,12).rotateZ(Math.PI/2).translate(24.9,.34,3.1),V);
+{
+let R=new w.CylinderGeometry(.7,.7,.35,12,1,!1,0,Math.PI);
+R.rotateZ(Math.PI/2),R.rotateX(-Math.PI/2),R.translate(24,4.6,4),v(R,b),v(new w.BoxGeometry(1.3,.14,.3).translate(24,4.62,4),S),v(new w.BoxGeometry(1.1,.1,.2).translate(24,4.76,4),V)
+}
+for(let[R,j]of[[22,6.5],[26,6.5],[24,1.5]])f(R,0,j);
+for(let[R,j,W]of[[-46,-40,2.8],[-50,-28,2.2],[-48,30,3],[-44,44,2.4],[46,-44,2.6],[50,-30,2.2],[48,34,3.2],[44,46,2.5],[-30,-48,2.8],[30,-48,2.4],[-28,48,2.6],[28,50,2.9],[12,-44,2.2],[-12,-44,2.6]])N(R,j,W);
+for(let[R,j,W]of[[-52,-46,2.2],[52,48,2.6],[-52,48,1.8],[52,-48,2],[0,-52,1.6],[0,52,1.6]])r(R,W*.55,j,W,{
+ink:P
+}
+),T(R,0,j,W*1.5,W*1.2,W*1.5);
+s(-12,0,-12,8,1.1,.5,{
+ink:b
+}
+),s(12,0,-12,8,1.1,.5,{
+ink:b
+}
+),s(-30,0,34,.5,1.1,8,{
+ink:b
+}
+),s(30,0,34,.5,1.1,8,{
+ink:b
+}
+),l(-14,0,8,1.3,1),s(-14,1,8,.15,2,.15,{
+noCollide:!0,ink:V
+}
+),s(-14,3,8,2.2,.3,.3,{
+noCollide:!0,ink:V
+}
+);
+for(let[R,j,W]of[[-10,30.6,46],[10,15,46],[-40,7.5,14],[40,7,-18],[0,5.9,-26],[0,13.45,0]])d(R,j,W);
+for(let[R,j,W]of[[0,1.25,8],[-20,0,0],[20,0,-14],[0,0,-36],[-40,6,-20],[40,5.5,0],[0,11,44],[0,13.5,0],[-24,0,24],[24,0,24]])f(R,j,W);
+for(let[R,j,W]of[[-40,6.2,-20],[40,7.2,-18],[-40,7.7,14],[40,6.7,16],[0,11.2,44],[0,5.6,-26],[-46,0,0],[46,0,0],[0,0,-50],[-30,0,46],[30,0,46],[0,13.6,0],[-10,30.8,46]])e.arenaSpawns.push(new w.Vector3(R,j,W));
+v(new w.SphereGeometry(14,14,10).translate(70,95,-150),b);
+for(let R=0;
+R<12;
+R++){
+let j=R/12*vt,W=new w.BoxGeometry(7,.9,.9);
+W.rotateZ(j),W.translate(70+Math.cos(j)*21,95+Math.sin(j)*21,-150),v(W,b)
+}
+for(let[R,j,W,U]of[[-120,-160,60,30],[40,-190,90,36],[150,-120,70,26],[-170,60,50,24],[160,90,80,30],[-60,190,100,34]])v(new w.BoxGeometry(W,U,30).translate(R,U/2,j),P),v(new w.BoxGeometry(W*.6,U*.5,22).translate(R,U+U*.25,j),P);
+return g(3,30,26,{
+rStep:8,hStep:6,scale:1.4
+}
+),n.finish(),e
+}
+function kr(n,t=!1){
+let{
+L:e,box:s,stairs:i,rail:o,cyl:a,sphere:l,ring:r,spawn:c,sniper:h,pickup:d,addGeo:f,collider:g,scene:v,prop:T,breakable:M,birds:O,mesh:b
+}
+=n,S=k.ORANGE,L=k.GREEN,V=k.PINK,P=k.BLACK,Z=k.BLUE;
+e.key="jungle",e.playerStart.set(0,0,50);
+let it=100,x=8,I=34,q=it+x/2;
+e.bounds={
+minX:-it,maxX:it,minZ:-it,maxZ:it
+}
+,e.style={
+paper:[.955,.948,.865],lines:1,inks:[[.06,.3,.52],[.86,.12,.2],[.34,.21,.1],[.95,.55,.1],[.1,.55,.22],[.9,.32,.55]]
+}
+;
+let K={
+noNav:!0,noGrapple:!0
+}
+,N=new w.Vector3(0,1,0),$=(m,E)=>new w.Mesh(m,gt({
+ink:E,side:w.DoubleSide
+}
+)),G=m=>Dn(m,!1),Y=[[-50,62],[-38,56],[-24,50],[-10,46],[6,44],[22,40],[38,32],[52,22],[64,10],[80,-6],[92,-20],[106,-32]],X=m=>{
+for(let E=0;
+E<Y.length-1;
+E++){
+let[z,_]=Y[E],[H,J]=Y[E+1];
+if(m<=H){
+let lt=Math.max(0,(m-z)/(H-z)),ct=lt*lt*(3-2*lt);
+return _+(J-_)*ct
+}
+
+}
+return Y[Y.length-1][1]
+}
+,at=m=>m<-44?13:7+2*Math.sin(m*.21);
+s(0,-2,0,2*q,1.5,2*q,{
+ink:L
+}
+),s(0,-.5,(-q-50)/2,2*q,.5,50- -q,{
+ink:L
+}
+);
+for(let m=-50;
+m<q;
+m+=4){
+let E=m+2,z=X(E),_=at(E),H=z-_/2,J=z+_/2;
+s((-q+H)/2,-.5,E,H+q,.5,4,{
+ink:L
+}
+),s((J+q)/2,-.5,E,q-J,.5,4,{
+ink:L
+}
+),s(z,-.32,E,_+.5,.08,4.02,{
+noCollide:!0,ink:Z,fill:!0
+}
+)
+}
+s(0,-2.3,0,800,1,800,{
+noCollide:!0,ink:L
+}
+);
+for(let[m,E]of[[27.6,40],[30.4,41.5],[33.4,40.2],[44.2,4],[47.4,5.4],[X(87)-2.6,87],[X(88.5),88.5],[X(87.5)+2.6,87.5]])s(m,-.5,E,1.3,.62,1.3,{
+ink:Z
+}
+);
+s(0,0,-it,2*q,I,x,{
+ink:L
+}
+),s(0,0,it,2*q,I,x,{
+ink:L
+}
+),s(-it,0,0,x,I,2*q,{
+ink:L
+}
+),s(it,0,0,x,I,2*q,{
+ink:L
+}
+),g(0,I,-it,2*q,60,x,K),g(0,I,it,2*q,60,x,K),g(-it,I,0,x,60,2*q,K),g(it,I,0,x,60,2*q,K),g(0,84,0,2*q+60,8,2*q+60,K);
+for(let m=-9;
+m<=9;
+m++){
+let E=m*11;
+for(let[z,_]of[[E,-it],[E,it],[-it,E],[it,E]]){
+let H=3.5+(m+9)%3,J=new w.SphereGeometry(H,9,7);
+J.scale(1,.7,1),J.translate(z+m*7%5-2,I+H*.3,_+m*3%5-2),f(J,L)
+}
+
+}
+for(let m=-8;
+m<=8;
+m++){
+let E=m*11+5.5;
+for(let[z,_,H,J]of[[E,-it,0,1],[E,it,0,-1],[-it,E,1,0],[it,E,-1,0]]){
+let lt=2.6+(m+8)%2,ct=new w.SphereGeometry(lt,8,6);
+ct.scale(1,.75,1),ct.translate(z+H*(x/2+lt*.35),I*.55+m*5%3*1.5,_+J*(x/2+lt*.35)),f(ct,L)
+}
+
+}
+let dt=m=>m+.2,R=(m,E,z,_,H,J={
+
+}
+)=>{
+let lt=z-_*.15;
+f(new w.CylinderGeometry(H*.72,H*1.15,lt,9).translate(m,lt/2,E),P),g(m,0,E,H*1.7,lt,H*1.7,{
+
+}
+);
+for(let tt=0;
+tt<4;
+tt++){
+let ot=tt*vt/4+(m+E)*.13,Tt=new w.CylinderGeometry(H*.32,H*.5,H*1.6,6);
+Tt.rotateZ(-1.15),Tt.rotateY(-ot),Tt.translate(m+Math.cos(ot)*(H*.95),H*.55,E+Math.sin(ot)*(H*.95)),f(Tt,P),g(m+Math.cos(ot)*(H+.4),0,E+Math.sin(ot)*(H+.4),1.1,.7+tt%2*.3,1.1,{
+
+}
+)
+}
+let ct=5+Math.floor(_/2.5);
+for(let tt=0;
+tt<ct;
+tt++){
+let ot=tt*vt/ct+.4+m*.01,Tt=tt===0?0:_*.55,Ct=_*(tt===0?.72:.42+tt*7%4*.05),Xt=new w.SphereGeometry(Ct,10,7);
+Xt.scale(1,.42,1),Xt.translate(m+Math.cos(ot)*Tt,z-1.1+tt*3%3*.2,E+Math.sin(ot)*Tt),f(Xt,L)
+}
+s(m,z-.3,E,_*1.36,.5,_*1.36,{
+ink:L
+}
+);
+for(let[tt,ot,Tt]of J.branches||[]){
+let Ct=tt==="+x"?1:tt==="-x"?-1:0,Xt=tt==="+z"?1:tt==="-z"?-1:0,ai=m+Ct*(H+Tt/2-.3),Ps=E+Xt*(H+Tt/2-.3);
+s(ai,ot,Ps,Ct?Tt:.75,.7,Xt?Tt:.75,{
+ink:P
+}
+);
+let De=new w.SphereGeometry(Tt*.32,8,6);
+De.scale(1,.55,1),De.translate(m+Ct*(H+Tt-.3),ot+1,E+Xt*(H+Tt-.3)),f(De,L)
+}
+for(let[tt,ot]of J.vines||[]){
+let Tt=m+Math.cos(tt)*_*.85,Ct=E+Math.sin(tt)*_*.85;
+s(Tt,z-ot,Ct,.14,ot,.14,{
+noCollide:!0,ink:L
+}
+)
+}
+for(let tt=0;
+tt<(J.fruit||0);
+tt++){
+let ot=tt*2.4+E*.02;
+l(m+Math.cos(ot)*_*.7,z-1.4-tt%2*.7,E+Math.sin(ot)*_*.7,.32,{
+seg:7,ink:tt%3?S:V
+}
+)
+}
+
+}
+;
+R(-46,-46,22,7,1.7,{
+branches:[["+x",8,7],["-z",13,6]],vines:[[.8,10],[3.6,12]],fruit:3
+}
+),R(-14,-46,22,6,1.5,{
+branches:[["+x",7,6]],vines:[[2.2,9]],fruit:2
+}
+),R(18,-30,28,7.5,1.9,{
+branches:[["-x",10,8],["+z",17,7]],vines:[[.5,12],[4.2,14]],fruit:4
+}
+),R(18,26,28,6.5,1.7,{
+branches:[["+x",9,7],["-x",16,6]],vines:[[1.6,11]],fruit:3
+}
+),R(-28,54,25,7,1.7,{
+branches:[["-x",9,7],["-z",15,7]],vines:[[5.2,11],[2.6,13]],fruit:3
+}
+),R(32,54,25,6,1.5,{
+branches:[["+x",8,6],["-z",14,6]],vines:[[1.2,12]],fruit:2
+}
+),R(-30,-14,34,8.5,2.2,{
+branches:[["+x",11,9],["-z",19,8],["+z",26,7]],vines:[[.2,14],[2.4,16],[4.4,12]],fruit:5
+}
+),R(48,-44,30,7.5,1.9,{
+branches:[["-x",10,8],["+z",19,7]],vines:[[2.9,14],[5.5,11]],fruit:3
+}
+),R(-56,12,17,6,1.5,{
+branches:[["+x",7,7],["-z",11,6]],vines:[[.4,9]],fruit:2
+}
+),R(56,8,18,6.5,1.6,{
+branches:[["-x",8,7],["+z",12,6]],vines:[[3.3,10]],fruit:3
+}
+),R(-62,-20,26,6.5,1.7,{
+branches:[["+x",9,8],["+z",16,7]],vines:[[0,13]],fruit:2
+}
+),R(62,44,32,7,1.9,{
+branches:[["-x",11,9],["-z",19,7],["-x",25,6]],vines:[[3,15],[4.6,12]],fruit:4
+}
+),R(0,66,15,6,1.5,{
+branches:[["-x",6,7],["+x",10,6]],vines:[[1,8]],fruit:2
+}
+),R(-10,28,12,5,1.3,{
+branches:[["-x",5,6]],vines:[[3.8,7]],fruit:2
+}
+),R(40,-10,14,5.5,1.4,{
+branches:[["-x",6,6],["+z",10,6]],vines:[[2,8]],fruit:2
+}
+),R(-90,-30,19,6,1.5,{
+branches:[["+x",8,7],["+z",13,6]],vines:[[.3,9]],fruit:2
+}
+),R(-44,-88,17,5.5,1.4,{
+branches:[["+x",7,6],["+z",11,6]],vines:[[1.1,8]],fruit:2
+}
+),R(60,90,15,5.5,1.4,{
+branches:[["-x",6,6],["-z",10,6]],vines:[[2.6,8]],fruit:2
+}
+),R(88,44,16,5.5,1.4,{
+branches:[["-x",7,6],["-z",11,6]],vines:[[3.5,8]],fruit:2
+}
+),R(-70,-80,40,9,2.5,{
+branches:[["+x",14,10],["+z",24,9],["-x",32,7]],vines:[[.6,16],[2.8,18],[4.6,14]],fruit:5
+}
+),R(-18,-82,40,8,2.3,{
+branches:[["-x",15,9],["+z",27,8]],vines:[[1.4,15],[3.9,17]],fruit:4
+}
+),R(76,72,42,9.5,2.6,{
+branches:[["-x",14,10],["-z",25,9],["-x",34,7]],vines:[[2.2,17],[4.1,15],[.3,19]],fruit:5
+}
+),R(28,82,42,8,2.3,{
+branches:[["+x",16,8],["-z",28,9]],vines:[[1,16],[4.4,18]],fruit:4
+}
+),R(-80,44,38,8.5,2.3,{
+branches:[["+x",13,10],["-z",22,8],["+x",30,7]],vines:[[.9,15],[3.2,17]],fruit:4
+}
+),R(82,-16,38,9,2.4,{
+branches:[["-x",12,10],["+z",21,9],["-x",29,7]],vines:[[2.5,16],[4.8,14]],fruit:5
+}
+);
+let j=(m,E,z,_,H)=>{
+let J=Math.abs(z-m)>Math.abs(_-E),lt=Math.abs(J?z-m:_-E),ct=(m+z)/2,tt=(E+_)/2;
+s(ct,H-.25,tt,J?lt:2.4,.25,J?2.4:lt,{
+ink:S
+}
+);
+for(let ot=0;
+ot<=Math.floor(lt);
+ot+=1){
+let Tt=ot/lt;
+s(m+(z-m)*Tt,H,E+(_-E)*Tt,J?.08:2.2,.03,J?2.2:.08,{
+noCollide:!0,ink:P
+}
+)
+}
+J?(o(m,tt-1.2,z,tt-1.2,H,{
+ink:P
+}
+),o(m,tt+1.2,z,tt+1.2,H,{
+ink:P
+}
+)):(o(ct-1.2,E,ct-1.2,_,H,{
+ink:P
+}
+),o(ct+1.2,E,ct+1.2,_,H,{
+ink:P
+}
+)),r(ct,H-1.4,tt,"y"),lt>36&&(r(m+(z-m)*.25,H-1.4,E+(_-E)*.25,"y"),r(m+(z-m)*.75,H-1.4,E+(_-E)*.75,"y"))
+}
+;
+j(-41.5,-46,-17.8,-46,dt(22)),j(18,-24.9,18,21.6,dt(28)),j(-23.2,54,27.9,54,dt(25)),j(-64.2,-80,-23.2,-82,dt(40)),j(33.2,82,69.8,72,dt(42)),s(-30,34.2,-14,7.5,.4,7.5,{
+ink:S
+}
+),o(-33.75,-17.75,-26.25,-17.75,34.6,{
+ink:P
+}
+),o(-33.75,-10.25,-26.25,-10.25,34.6,{
+ink:P
+}
+),o(-33.75,-17.75,-33.75,-10.25,34.6,{
+ink:P
+}
+),s(-28.6,34.6,-14,3.6,2.8,3.6,{
+ink:S
+}
+),s(-28.6,37.4,-14,4.4,.3,4.4,{
+ink:L
+}
+),s(-28.6,34.6,-12.15,1.2,2.2,.1,{
+noCollide:!0,ink:P
+}
+),r(-30,39,-14,"y"),s(48,30.2,-44,5,.4,5,{
+ink:S
+}
+),o(45.5,-46.5,50.5,-46.5,30.6,{
+ink:P
+}
+),o(50.5,-46.5,50.5,-41.5,30.6,{
+ink:P
+}
+),o(45.5,-41.5,50.5,-41.5,30.6,{
+ink:P
+}
+);
+let W=(m,E,z,_,H,J)=>{
+let lt=b(new w.SphereGeometry(.42,8,6),L),ct=b(new w.CylinderGeometry(1,1,1,5),L);
+v.add(lt,ct),e.meshes.push(lt,ct);
+for(let Ct=0;
+Ct<3;
+Ct++){
+let Xt=b(new w.BoxGeometry(.9,.05,.4).translate(.45,0,0),L);
+Xt.rotation.set(0,Ct*2.1,-.4),lt.add(Xt)
+}
+e.grappleMovers.push({
+mesh:lt,radius:1.3
+}
+);
+let tt=new w.Vector3(m,E,z),ot=Math.cos(J),Tt=Math.sin(J);
+e.animated.push({
+mesh:lt,update:Ct=>{
+let Xt=.45*Math.sin(Ct*1.1+H);
+lt.position.set(m+Math.sin(Xt)*_*ot,E-Math.cos(Xt)*_,z+Math.sin(Xt)*_*Tt),lt.rotation.y=Ct*.6,vs(ct,tt,lt.position,.07)
+}
+
+}
+)
+}
+;
+W(18,27.7,0,15,0,.3),W(0,24.7,54,13,1.5,1.4),W(-30,21.7,-46,11,3,.1),W(-30,19.3,-24,11,2.2,1.2),W(48,19.3,-35.5,10,4.1,.4),W(57,31.7,44,15,.7,2),W(-58,25.7,-20,12,2.8,1.57),W(-14,11.7,28,7,1.1,1.57),W(-70,39.7,-72,17,.9,0),W(76,41.7,64,18,2.4,.5),W(-80,37.7,50,16,3.3,.1),W(82,37.7,-8,16,1.7,.3),W(-18,39.7,-76,17,4.4,0),W(34,41.7,82,17,.2,1.57),W(66,30,-78.4,7.5,3.1,0);
+let U={
+ink:Z
+}
+;
+s(0,0,-11.25,36,6,13.5,U),s(0,0,11.25,36,6,13.5,U),s(0,4.4,0,36,1.6,9,U),s(0,6,0,26,5,26,U),s(0,11,0,17,5,17,U),s(0,16,0,9,4,9,U),s(0,20,0,5,3.4,5,U),s(0,23.4,0,5,.6,5,U),s(0,24,0,1.4,7,1.4,U),l(0,31.9,0,.9,{
+seg:9,ink:S
+}
+);
+for(let m=0;
+m<8;
+m++){
+let E=m*vt/8;
+f(new w.BoxGeometry(1.4,.16,.16).rotateZ(E).translate(Math.cos(E)*1.5,31.9+Math.sin(E)*1.5,0),S)
+}
+g(0,31,0,1.8,1.8,1.8,{
+
+}
+),r(0,33.8,0,"y"),i(0,0,25.5,"-z",16,4,{
+rise:6/16,run:.47
+}
+),i(0,0,-25.5,"+z",16,4,{
+rise:6/16,run:.47
+}
+),i(-14.1,6,-15,"+z",14,2.2,{
+rise:5/14,run:.45
+}
+),i(9.5,11,8,"-z",12,2,{
+rise:5/12,run:.45
+}
+),i(-8,16,5.5,"+x",10,2,{
+rise:4/10,run:.45
+}
+),i(-4.5,20,-3.3,"+x",8,1.6,{
+rise:.5,run:.35
+}
+);
+for(let[m,E,z,_,H,J]of[[-2.8,8.4,-13.06,1.8,.7,.1],[2.8,8.4,-13.06,1.8,.7,.1],[0,6.6,-13.06,3.8,.5,.1],[0,7.2,-13.06,.7,1.5,.1],[-4.2,9.4,-13.06,1.2,.3,.1],[4.2,9.4,-13.06,1.2,.3,.1]])s(m,E,z,_,H,J,{
+noCollide:!0,ink:P
+}
+);
+for(let[m,E,z,_,H,J]of[[-9,1,18.06,6,3.6,.1],[12,.5,18.06,5,2.6,.1],[-18.06,.5,-9,.1,4,4],[18.06,1.5,8,.1,3.4,4],[13.06,7,4,.1,3,4],[-6,12,-8.56,4,3,.1],[4,16.5,4.56,3,2.4,.1]])s(m,E,z,_,H,J,{
+noCollide:!0,ink:L
+}
+);
+for(let[m,E,z]of[[-18.2,-13,12],[18.2,13,12],[13.2,-13.2,17],[-8.6,8.6,21]])s(m,1,E,.14,z,.14,{
+noCollide:!0,ink:L
+}
+);
+let kt=(m,E,z,_=1)=>{
+let H=b(new w.ConeGeometry(.5*_,1.6*_,6),S);
+H.position.set(m,E,z),v.add(H),e.meshes.push(H),e.animated.push({
+mesh:H,update:J=>{
+H.scale.set(1+Math.sin(J*9+m)*.12,1+Math.sin(J*13+z)*.25,1+Math.cos(J*11)*.12),H.rotation.y=J*2
+}
+
+}
+)
+}
+;
+for(let[m,E]of[[-11.5,-11.5],[11.5,-11.5],[11.5,11.5],[-11.5,11.5]])a(m,6,E,.36,1.3,{
+seg:7,ink:P
+}
+),f(new w.CylinderGeometry(.55,.4,.3,8).translate(m,7.4,E),P),kt(m,8.2,E,.9);
+for(let[m,E]of[[-24,-24],[24,-24],[-24,24],[24,24]])a(m,0,E,1.1,13,{
+seg:8,ink:Z
+}
+),s(m,13,E,2.8,.5,2.8,{
+ink:Z
+}
+),f(new w.TorusGeometry(1.3,.12,5,10).rotateX(Math.PI/2).translate(m,4,E),P);
+for(let[m,E,z,_]of[[-22,-8,5,.8],[22,8,5,.8],[-8,-22,.8,5],[8,22,.8,5]])s(m,0,E,z,1.1,_,{
+ink:Z
+}
+);
+for(let m=0;
+m<10;
+m++)s(m%2?.9:-.9,0,27+m*2.4,1.3,.12,1.3,{
+noCollide:!0,ink:Z
+}
+);
+let et=21;
+s(52,0,-66,6,et,26,U),s(75.5,0,-66,7,et,26,U),s(63.5,0,-70,17,et,18,U),s(63.5,3.6,-57,17,et-3.6,8,U),s(70,et,-70,16,4,16,U),s(62,et+4,-74,5,2,5,U),s(64,0,-87.5,44,30,17,U),i(66,et+4,-73,"-z",12,3,{
+rise:5/12,run:.5
+}
+),r(64,33,-88,"y");
+for(let m=0;
+m<7;
+m++){
+let E=m*.9;
+l(62+Math.cos(E)*4,-.1,-48+Math.sin(E)*2.5,.7+m%2*.3,{
+seg:7,ink:Z
+}
+)
+}
+s(63.5,0,-56,3,.4,3,{
+noCollide:!0,ink:P
+}
+);
+for(let[m,E,z]of[[50,-52,4],[78,-52,5]])s(m,0,E,2,z,2,U);
+for(let[m,E,z,_,H,J]of[[48.94,4,-60,.1,6,8],[79.06,6,-62,.1,5,6],[44,12,-78.94,10,8,.1],[80,20,-78.94,8,6,.1]])s(m,E,z,_,H,J,{
+noCollide:!0,ink:L
+}
+);
+{
+let m=new w.CylinderGeometry(2.4,2.4,5.5,3);
+m.rotateZ(Math.PI/2),m.rotateX(-Math.PI/2),m.translate(-54,1.2,40),f(m,S),g(-54,0,40,5.5,3.6,4.2,{
+
+}
+),s(-56.9,0,40,.16,3.4,.16,{
+noCollide:!0,ink:P
+}
+),s(-51.1,0,40,.16,3.4,.16,{
+noCollide:!0,ink:P
+}
+)
+}
+s(-40,.75,62,4.8,1.4,2.3,U),s(-41,2.15,62,2.4,1.1,2.1,U),s(-38.2,2.15,62,1.4,.15,2.1,{
+noCollide:!0,ink:P
+}
+);
+for(let[m,E]of[[-41.6,63.3],[-38.4,63.3],[-41.6,60.7],[-38.4,60.7]]){
+let z=new w.CylinderGeometry(.55,.55,.4,10);
+z.rotateX(Math.PI/2),z.translate(m,.55,E),f(z,P)
+}
+for(let m=0;
+m<7;
+m++){
+let E=m*vt/7;
+l(-47+Math.cos(E)*1.3,.25,48+Math.sin(E)*1.3,.3,{
+seg:6,ink:Z
+}
+)
+}
+{
+let m=new w.CylinderGeometry(.18,.18,1.8,6);
+m.rotateZ(Math.PI/2);
+let E=m.clone();
+E.rotateY(Math.PI/2),m.translate(-47,.2,48),E.translate(-47,.2,48),f(m,P),f(E,P),kt(-47,.9,48)
+}
+for(let[m,E]of[[-44,44],[-50,46]])s(m,.4,E,2.2,.14,.6,{
+ink:P
+}
+),s(m,0,E,1.9,.4,.2,{
+noCollide:!0,ink:P
+}
+);
+s(-84,0,74,9,3.4,1.2,U),s(-89,0,82,1.2,4.8,12,U),s(-76,0,88,1.2,2.8,8,U),a(-80,0,78,.9,5.5,{
+seg:8,ink:Z
+}
+),a(-74,0,80,.9,3,{
+seg:8,ink:Z
+}
+),f(new w.CylinderGeometry(1.1,1.1,.4,8).translate(-80,5.6,78),Z);
+{
+let m=new w.CylinderGeometry(.85,.9,9,9);
+m.rotateZ(Math.PI/2),m.translate(-78,.85,86),f(m,Z),g(-78,0,86,9,1.7,1.7,{
+
+}
+)
+}
+i(-86,0,91.5,"+x",7,2.5,{
+rise:.38,run:.5
+}
+),s(-80.25,0,91.5,4.5,2.66,3,U);
+for(let[m,E,z,_,H,J]of[[-88.4,.5,80,.1,3.4,5],[-84,1,74.66,4,2.2,.1]])s(m,E,z,_,H,J,{
+noCollide:!0,ink:L
+}
+);
+s(84,0,30,10,3,10,U),s(84,3,30,6,2.6,6,U),i(84,0,38.6,"-z",8,3,{
+rise:3/8,run:.45
+}
+);
+for(let[m,E,z,_,H,J]of[[78.94,.4,28,.1,2.4,5],[86,3.2,33.06,3,2,.1]])s(m,E,z,_,H,J,{
+noCollide:!0,ink:L
+}
+);
+for(let m=0;
+m<7;
+m++){
+let E=m*vt/7+.3,z=-78+Math.cos(E)*7,_=-52+Math.sin(E)*7;
+s(z,0,_,1.3,3.2+m%3*.8,1,U)
+}
+s(-78,0,-52,2.5,1,2.5,U),s(17,0,-88,2.2,11,2.2,U),s(27,0,-88,2.2,11,2.2,U),s(22,11,-88,13,1.8,2.6,U),r(22,14.6,-88,"y");
+for(let[m,E]of[[-8,86],[-4,86],[-8,90],[-4,90]])a(m,0,E,.2,12.4,{
+noCollide:!0,seg:6,ink:P
+}
+);
+s(-6,12,88,5.4,.4,5.4,{
+ink:S
+}
+),o(-8.7,85.3,-3.3,85.3,12.4,{
+ink:P
+}
+),o(-3.3,85.3,-3.3,90.7,12.4,{
+ink:P
+}
+),o(-8.7,90.7,-3.3,90.7,12.4,{
+ink:P
+}
+);
+for(let[m,E]of[[-8.4,85.6],[-3.6,85.6],[-8.4,90.4],[-3.6,90.4]])a(m,12.4,E,.14,3.6,{
+noCollide:!0,seg:5,ink:P
+}
+);
+f(new w.ConeGeometry(4.4,3.2,7).translate(-6,17.6,88),S),r(-6,20.2,88,"y"),i(-9.4,0,95,"-z",24,1.8,{
+rise:.5,run:.3
+}
+);
+let xt=(m,E,z,_=.9,H=0)=>{
+let lt=[];
+for(let tt=0;
+tt<=7;
+tt++){
+let ot=tt/7;
+lt.push(new w.Vector3(m+Math.cos(H)*_*1.6*ot*ot,ot*z,E+Math.sin(H)*_*1.6*ot*ot))
+}
+for(let tt=0;
+tt<7;
+tt++){
+let ot=lt[tt],Tt=lt[tt+1],Ct=Tt.clone().sub(ot),Xt=Ct.length();
+Ct.divideScalar(Xt);
+let ai=new w.Quaternion().setFromUnitVectors(N,Ct),Ps=new w.CylinderGeometry(.36-(tt+1)*.028,.36-tt*.028,Xt+.08,7);
+if(Ps.applyQuaternion(ai),Ps.translate((ot.x+Tt.x)/2,(ot.y+Tt.y)/2,(ot.z+Tt.z)/2),f(Ps,P),tt){
+let De=new w.TorusGeometry(.38-tt*.028,.035,4,9);
+De.rotateX(Math.PI/2),De.applyQuaternion(ai),De.translate(ot.x,ot.y,ot.z),f(De,P)
+}
+
+}
+let ct=lt[7];
+g(m+Math.cos(H)*_*.6,0,E+Math.sin(H)*_*.6,1,z,1,{
+
+}
+);
+for(let tt=0;
+tt<7;
+tt++){
+let ot=new w.BoxGeometry(.6,.12,4.2);
+ot.translate(0,0,1.9),ot.rotateX(.55),ot.rotateY(tt*vt/7+m*.1),ot.translate(ct.x,ct.y+.2,ct.z),f(ot,L)
+}
+for(let tt=0;
+tt<3;
+tt++)l(ct.x+Math.cos(tt*2.1)*.35,ct.y-.15,ct.z+Math.sin(tt*2.1)*.35,.24,{
+seg:6,ink:P
+}
+)
+}
+;
+xt(33,18,9,.9,.4),xt(52,4,11,1.1,2.6),xt(19,46,8,.8,1.2),xt(3,62,10,1,4),xt(68,-38,9,.9,5.2),xt(-24,88,10,1,.6),xt(86,52,9,.9,3.4),xt(-90,-62,11,1.2,1),xt(-60,82,9,.8,2.2);
+let Mt=(m,E,z,_,H=.6,J=P)=>{
+let lt=new w.CylinderGeometry(H,H*1.08,z,9);
+_?lt.rotateZ(Math.PI/2):lt.rotateX(Math.PI/2),lt.translate(m,H,E),f(lt,J),g(m,0,E,_?z:H*2,H*2,_?H*2:z,{
+
+}
+);
+let ct=new w.CylinderGeometry(H*.7,H*.7,.06,9);
+_?(ct.rotateZ(Math.PI/2),ct.translate(m+z/2,H,E)):(ct.rotateX(Math.PI/2),ct.translate(m,H,E+z/2)),f(ct,S)
+}
+;
+Mt(-20,-30,9,!0),Mt(36,-18,8,!1),Mt(-44,26,10,!0),Mt(20,44,7,!0),Mt(45,1,12,!0,.55),Mt(-4,-60,8,!1),Mt(58,62,8,!0),Mt(-80,-40,9,!1),Mt(72,88,10,!0),Mt(88,20,8,!1),Mt(-56,-74,8,!0);
+for(let[m,E,z]of[[8,-52,2],[-58,-58,2.4],[60,64,2.2],[-12,62,1.7],[42,-8,1.5],[-66,40,2],[28,8,1.4],[-24,6,1.5],[-92,24,2.2],[92,-42,2],[-32,-86,1.8],[8,92,2.4],[-88,60,1.6],[92,86,2.6]])l(m,z*.55,E,z,{
+seg:8,ink:Z
+}
+),g(m,0,E,z*1.5,z*1.15,z*1.5,{
+
+}
+);
+for(let[m,E]of[[-34,36],[26,-56],[-64,62],[64,24],[-40,-64],[8,20],[-50,-84],[46,84],[90,-70],[-92,88]])a(m,0,E,.8,1,{
+seg:8,ink:P
+}
+),f(new w.CylinderGeometry(.62,.62,.06,9).translate(m,1.03,E),S);
+for(let[m,E,z,_]of[[-36,-20,2.2,1.6],[-40,-24,3.6,1.4],[24,-36,2.4,1.5],[-22,50,2,1.7],[58,40,2.6,1.4],[62,36,4.2,1.2],[-75,40,2.4,1.6],[-72,36,4,1.4],[78,-22,2.2,1.6],[74,-26,4.2,1.3],[-64,-80,2.6,1.5],[70,78,2.4,1.6]]){
+a(m,0,E,.4,z,{
+seg:7,ink:Z
+}
+);
+let H=new w.SphereGeometry(_,10,6,0,vt,0,Math.PI/2);
+H.scale(1,.55,1),H.translate(m,z,E),f(H,S),g(m,z,E,_*1.7,_*.5,_*1.7,{
+
+}
+);
+for(let J=0;
+J<3;
+J++)l(m+Math.cos(J*2.1)*_*.55,z+_*.45,E+Math.sin(J*2.1)*_*.55,.18,{
+seg:5,ink:V
+}
+)
+}
+let jt=7,ce=(m,E)=>(jt=jt*16807%2147483647,m+jt/2147483647*(E-m)),ts=(m,E)=>(Math.abs(m)>21||Math.abs(E)>21)&&!(m<-66&&m>-92&&E>-16&&E<16);
+for(let m=0;
+m<72;
+m++){
+let E=ce(-94,94),z=ce(-94,94);
+if(!(!ts(E,z)||Math.abs(E-X(z))<at(z)/2+1))for(let _=0;
+_<5;
+_++){
+let H=new w.BoxGeometry(.16,1.1+ce(0,.8),.05);
+H.translate(0,.6,0),H.rotateZ(ce(-.7,.7)),H.rotateY(_*1.26),H.translate(E,0,z),f(H,L)
+}
+
+}
+for(let m=0;
+m<46;
+m++){
+let E=ce(-94,94),z=ce(-94,94);
+!ts(E,z)||Math.abs(E-X(z))<at(z)/2+1||(s(E,0,z,.07,.9,.07,{
+noCollide:!0,ink:L
+}
+),l(E,1,z,.24,{
+seg:6,ink:m%4?V:S
+}
+))
+}
+for(let m=0;
+m<28;
+m++){
+let E=ce(-94,94),z=ce(-94,94);
+if(!ts(E,z)||Math.abs(E-X(z))<at(z)/2+1)continue;
+a(E,0,z,.12,.45,{
+noCollide:!0,seg:5,ink:Z
+}
+);
+let _=new w.SphereGeometry(.34,7,4,0,vt,0,Math.PI/2);
+_.scale(1,.6,1),_.translate(E,.42,z),f(_,S)
+}
+let Lt=(m,E,z,_=!1,H=0)=>M("urn",m,E,z,_?1.5:1,_?1.7:1.1,_?1.5:1,J=>{
+let lt=_?.68:.45,ct=_?1.6:1.05,tt=6;
+for(let ot=0;
+ot<tt;
+ot++)J.add($(new w.CylinderGeometry(lt*.72,lt,ct,3,1,!0,ot*vt/tt,vt/tt).translate(0,ct/2,0),S));
+for(let ot of[0,1])J.add(b(new w.TorusGeometry(lt*.74,.06,5,8,Math.PI).rotateX(Math.PI/2).rotateY(ot*Math.PI).translate(0,ct,0),P));
+J.add(b(new w.TorusGeometry(lt*.99,.05,4,14).rotateX(Math.PI/2).translate(0,ct*.42,0),Z)),J.rotation.y=H
+}
+,{
+hp:1,ink:S
+}
+),Cs=(m,E,z=3,_=5)=>M("bamboo",m,0,E,1.3,_,1.3,H=>{
+for(let J=0;
+J<z;
+J++){
+let lt=J*2.4+m,ct=Math.cos(lt)*.4,tt=Math.sin(lt)*.4,ot=_*(.75+J*3%3*.12),Tt=ot/3;
+for(let Ct=0;
+Ct<3;
+Ct++)H.add(b(G([new w.CylinderGeometry(.11,.13,Tt-.05,6).translate(ct,Ct*Tt+Tt/2,tt),new w.CylinderGeometry(.15,.15,.07,6).translate(ct,(Ct+1)*Tt-.03,tt)]),L));
+H.add(b(G([0,1,2].map(Ct=>new w.BoxGeometry(.08,.05,.9).translate(0,0,.45).rotateX(-.5).rotateY(Ct*2.1+J).translate(ct,ot-Ct*.6,tt))),L))
+}
+
+}
+,{
+hp:20,ink:L
+}
+),ye=(m,E,z,_=0)=>M("crateB",m,E,z,1.3,1.3,1.3,H=>{
+let J=(lt,ct)=>{
+let tt=[];
+for(let Tt=-1;
+Tt<=1;
+Tt++)tt.push(new w.BoxGeometry(1.24,.36,.08).translate(0,Tt*.42,.62));
+let ot=G(tt);
+return ot.rotateX(lt),ot.rotateY(ct),ot.translate(0,.65,0),ot
+}
+;
+for(let[lt,ct,tt]of[[0,0,Z],[0,Math.PI,Z],[0,Math.PI/2,S],[0,-Math.PI/2,S],[Math.PI/2,0,Z],[-Math.PI/2,0,Z]])H.add(b(J(lt,ct),tt));
+H.rotation.y=_
+}
+,{
+hp:30,ink:Z
+}
+),Bs=(m,E,z=0)=>M("totem",m,0,E,1.3,5.2,1.3,_=>{
+for(let H=0;
+H<4;
+H++){
+let J=H*1.25;
+_.add(b(new w.BoxGeometry(1.1,1.2,1).translate(0,J+.6,0),H%2?S:Z)),_.add(b(G([new w.BoxGeometry(.28,.16,.1).translate(-.25,J+.8,.52),new w.BoxGeometry(.28,.16,.1).translate(.25,J+.8,.52),new w.BoxGeometry(.5,.14,.1).translate(0,J+.32,.52),new w.BoxGeometry(.16,.3,.16).translate(0,J+.56,.55)]),P))
+}
+_.add(b(G([new w.BoxGeometry(2.4,.25,.5).translate(0,5.05,0),new w.BoxGeometry(.5,.8,.5).translate(0,5.3,0)]),L)),_.rotation.y=z
+}
+,{
+hp:45,ink:S
+}
+),ii=(m,E,z=0)=>M("sign",m,0,E,.8,3.2,.8,_=>{
+_.add(b(new w.CylinderGeometry(.09,.11,3.1,6).translate(0,1.55,0),P));
+for(let H=0;
+H<3;
+H++){
+let J=new w.Group;
+J.add(b(new w.BoxGeometry(1.3,.32,.06).translate(.55,0,0),S),b(new w.BoxGeometry(.7,.05,.07).translate(.5,.02,0),P)),J.position.y=2.9-H*.5,J.rotation.y=H*2.2,_.add(J)
+}
+_.rotation.y=z
+}
+,{
+hp:15,ink:S
+}
+),qe=(m,E,z)=>M("nest",m,E,z,1,1.4,1,_=>{
+for(let[H,J]of[[.28,1.2],[.42,.85],[.48,.5],[.36,.2]])_.add(b(new w.SphereGeometry(H,9,6).scale(1,.6,1).translate(0,J,0),S));
+_.add(b(new w.CylinderGeometry(.03,.03,1.3,4).translate(0,1.95,0),P))
+}
+,{
+hp:1,ink:S
+}
+);
+Lt(-16.5,6,-16.5,!0),Lt(16.5,6,16.5,!0),Lt(16.5,6,-16.5),Lt(-16.5,6,16.5,!1,.7),Lt(-27,0,-22),Lt(27,0,22,!0),Lt(22,0,-27,!1,1.1),Lt(-22,0,27),Lt(-14,0,3,!0),Lt(12,0,-3),Lt(-83,0,80,!0),Lt(-86,0,76),Lt(-81.4,2.66,92.3),Lt(91,0,24),Lt(80,0,36,!0),Lt(82.5,5.6,28.3),Lt(66,0,-55.5),Lt(61,0,-59,!0),Lt(19.5,0,-90.5),Lt(24.5,0,-85.5,!0),Lt(-57,0,46),Lt(-77,0,-46,!1,2),Lt(-6.2,12.4,90,!1,.4);
+for(let[m,E,z,_]of[[-86,-8,3,5],[-82,2,4,5.5],[-88,10,3,4.5],[-76,-4,3,5],[-72,8,3,4.5],[-80,-12,4,6],[-70,-10,3,4],[-84,14,3,5],[-78,12,3,5.5],[-30,70,3,4.5],[46,20,3,4],[-40,76,4,5],[54,-28,3,4.5],[-52,-30,3,5]])Cs(m,E,z,_);
+ye(-48,0,55,.5),ye(-38,0,58),ye(68.5,0,-56),ye(-3.5,0,92,.3),ye(26,0,-92),ye(52,30,-92,.4),ye(30,0,62,.8),ye(-60,0,-44),Bs(-26,34),Bs(26,-36,.5),Bs(-70,70,-.6),Bs(70,30,2),Bs(-40,-88,1),ii(-8,52,.4),ii(-46,36,-1),ii(32,-50,2.2),ii(10,86,1.6),qe(-41,6.4,-46),qe(23,7.4,26),qe(56,9.4,44),qe(-23,9.4,-14),qe(-51,5.4,12),qe(40,8.4,-6),qe(75,10.4,-16),qe(-74,11.4,44);
+let oe=(m,E,z,_=0)=>T("crate",m,E,z,{
+x:.6,y:.6,z:.6
+}
+,H=>{
+H.add(b(new w.BoxGeometry(1.2,1.2,1.2),Z));
+for(let J of[-1,1])H.add(b(new w.BoxGeometry(1.24,.14,1.24).translate(0,J*.36,0),S)),H.add(b(new w.BoxGeometry(1.24,1.24,.14).translate(0,0,J*.36),S));
+H.add(b(new w.BoxGeometry(.5,.36,.02).translate(0,.02,.62),P))
+}
+,{
+mass:1,snap:"cube",ink:Z,yaw:_
+}
+),Se=(m,E,z)=>T("barrel",m,E,z,{
+x:.52,y:.62,z:.52
+}
+,_=>{
+_.add(b(new w.CylinderGeometry(.5,.5,1.24,10),S));
+for(let H of[-.36,.36])_.add(b(new w.TorusGeometry(.5,.05,4,14).rotateX(Math.PI/2).translate(0,H,0),P));
+_.add(b(new w.CylinderGeometry(.12,.12,.08,8).translate(.2,.64,.1),P))
+}
+,{
+mass:1.3,snap:"cube",ink:S
+}
+),ze=(m,E,z,_=.85)=>T("boulder",m,E,z,{
+x:_,y:_,z:_
+}
+,H=>{
+H.add(b(new w.DodecahedronGeometry(_,1),Z))
+}
+,{
+mass:3.2,snap:"free",ink:Z,radius:_,footHalf:_*.85
+}
+),be=(m,E,z)=>T("coconut",m,E,z,{
+x:.3,y:.3,z:.3
+}
+,_=>{
+_.add(b(new w.SphereGeometry(.3,8,6),P)),_.add(b(G([0,1,2].map(H=>new w.SphereGeometry(.05,4,3).translate(Math.cos(H*2.1)*.12,.27,Math.sin(H*2.1)*.12))),S))
+}
+,{
+mass:.25,snap:"free",ink:P,radius:.3
+}
+),bs=(m,E,z,_=0)=>T("log",m,E,z,{
+x:.9,y:.45,z:.45
+}
+,H=>{
+H.add(b(new w.CylinderGeometry(.45,.45,1.8,9).rotateZ(Math.PI/2),P)),H.add(b(G([-1,1].map(J=>new w.CylinderGeometry(.34,.34,.05,9).rotateZ(Math.PI/2).translate(J*.9,0,0))),S))
+}
+,{
+mass:1.6,snap:"yaw",ink:P,footHalf:.45,yaw:_
+}
+),oi=(m,E,z,_=0)=>T("idol",m,E,z,{
+x:.6,y:.8,z:.55
+}
+,H=>{
+H.add(b(new w.BoxGeometry(1.2,1.6,1.1),Z)),H.add(b(G([new w.BoxGeometry(.9,.3,.1).translate(0,.35,.56),new w.BoxGeometry(.5,.35,.1).translate(0,-.35,.56)]),P)),H.add(b(new w.BoxGeometry(.25,.5,.2).translate(0,.05,.6),Z)),H.add(b(new w.BoxGeometry(1.4,.3,1.3).translate(0,.85,0),S))
+}
+,{
+mass:4,snap:"cube",ink:Z,yaw:_
+}
+),ge=(m,E,z)=>T("skull",m,E,z,{
+x:.28,y:.28,z:.28
+}
+,_=>{
+_.add(b(new w.SphereGeometry(.28,8,6),Z)),_.add(b(G([new w.BoxGeometry(.1,.1,.06).translate(-.09,.03,.26),new w.BoxGeometry(.1,.1,.06).translate(.09,.03,.26),new w.BoxGeometry(.2,.06,.05).translate(0,-.16,.24)]),P))
+}
+,{
+mass:.3,snap:"free",ink:Z,radius:.28
+}
+),ke=(m,E,z,_=0)=>T("jar",m,E,z,{
+x:.38,y:.45,z:.38
+}
+,H=>{
+H.add(b(new w.CylinderGeometry(.28,.38,.9,9),S)),H.add(b(new w.TorusGeometry(.3,.05,4,10).rotateX(Math.PI/2).translate(0,.45,0),P))
+}
+,{
+mass:.7,snap:"cube",ink:S,yaw:_
+}
+),Is=(m,E,z,_=0)=>T("chest",m,E,z,{
+x:.7,y:.45,z:.5
+}
+,H=>{
+H.add(b(new w.BoxGeometry(1.4,.6,1).translate(0,-.15,0),P)),H.add(b(new w.BoxGeometry(1.44,.3,1.04).translate(0,.3,0),P)),H.add(b(G([-.45,.45].map(J=>new w.BoxGeometry(.16,.94,1.08).translate(J,0,0))),S)),H.add(b(new w.BoxGeometry(.2,.26,.08).translate(0,.1,.53),Z))
+}
+,{
+mass:2.5,snap:"cube",ink:P,yaw:_
+}
+),go=(m,E,z,_=0)=>T("wheel",m,E,z,{
+x:.75,y:.75,z:.14
+}
+,H=>{
+H.add(b(new w.TorusGeometry(.66,.09,6,14),P)),H.add(b(G([0,1,2,3].map(J=>new w.BoxGeometry(.08,1.3,.06).rotateZ(J*Math.PI/4))),S)),H.add(b(new w.CylinderGeometry(.16,.16,.26,8).rotateX(Math.PI/2),P))
+}
+,{
+mass:1.2,snap:"cube",ink:P,yaw:_,footHalf:.3
+}
+),ni=(m,E,z,_=0)=>T("bundle",m,E,z,{
+x:1,y:.3,z:.3
+}
+,H=>{
+H.add(b(G([[0,.16],[.14,-.08],[-.14,-.08],[0,-.02]].map(([J,lt])=>new w.CylinderGeometry(.1,.1,2,6).rotateZ(Math.PI/2).translate(0,lt,J))),L)),H.add(b(G([-.6,.6].map(J=>new w.TorusGeometry(.27,.04,4,10).rotateY(Math.PI/2).translate(J,0,0))),P))
+}
+,{
+mass:1.1,snap:"yaw",ink:L,footHalf:.3,yaw:_
+}
+),es=(m,E,z,_=0)=>T("head",m,E,z,{
+x:1,y:1,z:1
+}
+,H=>{
+H.add(b(new w.SphereGeometry(1,9,7).scale(.95,1.05,.9),Z)),H.add(b(G([new w.BoxGeometry(.4,.2,.15).translate(-.35,.2,.86),new w.BoxGeometry(.4,.2,.15).translate(.35,.2,.86),new w.BoxGeometry(.7,.18,.15).translate(0,-.4,.82),new w.BoxGeometry(.26,.5,.25).translate(0,-.05,.9)]),P)),H.add(b(new w.BoxGeometry(1.6,.35,1.5).translate(0,.95,0),S))
+}
+,{
+mass:6,snap:"free",ink:Z,radius:1,yaw:_
+}
+),Ve=(m,E,z)=>T("gourd",m,E,z,{
+x:.32,y:.32,z:.32
+}
+,_=>{
+_.add(b(new w.SphereGeometry(.32,8,6).scale(1,.85,1),L)),_.add(b(new w.CylinderGeometry(.04,.05,.3,5).translate(0,.36,0),P))
+}
+,{
+mass:.35,snap:"free",ink:L,radius:.32
+}
+);
+oe(-49,0,50,.3),oe(-47.6,0,52.2),oe(-52,0,44.5,-.5),oe(-51,1.2,44.5),oe(-22,0,14),oe(22,0,-14,.4),oe(64,0,-58),oe(52,0,12,.8),oe(-58,0,-40),oe(20,0,60),oe(-4.5,12.4,86.8,.2),oe(70,30,-92),oe(30,0,-90,.3),oe(-72,0,50,.7),oe(-70.8,0,51.5),oe(-70.8,1.2,51),Se(-44,0,40),Se(-45.2,0,41.3),Se(-37,0,60),Se(60,0,-57),Se(-21,0,2),Se(48,30,-86),Se(74,25,-66),Se(14,0,-91),Se(-86,0,84),ze(20,0,-48),ze(-36,0,30),ze(44,0,30,.7),ze(-6,0,-22),ze(12,0,58,.75),ze(-60,0,20,.95),ze(78,30,-88,.8),ze(-84,0,-70,.9),ze(40,0,78,.7),be(34.5,0,16),be(35.6,0,19.2),be(50.4,0,6),be(53,0,2.2),be(17.5,0,44.6),be(20.6,0,47.4),be(1.6,0,60),be(66.5,0,-36),be(-22.5,0,86.5),be(84.5,0,50.5),be(-88.4,0,-60),be(-58.6,0,80.5),bs(-20,0,-27.4,0),bs(-22.6,0,32,0),bs(38,0,-22.4,1.5708),bs(-2,0,-58,1.5708),bs(-78,0,-36,0),bs(74,0,84,.3),oi(3.5,20,3.5,3.9),oi(-20,0,-22,.8),oi(20,0,21,-2.2),oi(-80,0,83,2.6),ge(-3,0,2.5),ge(4,0,-2),ge(-8,0,-1.5),ge(-11,11,-6.8),ge(-10.5,11,-6),ge(-79,0,84),ge(-77.8,0,83.2),ge(85.5,5.6,31.5),ge(-78.6,1,-52.6),ge(36,0,8),ge(66,30,-84),ge(64.5,0,-55),ke(-15,6,10,.3),ke(15,6,-10),ke(11,11,6.5),ke(-25.5,0,-22),ke(23,0,26),ke(-86.5,0,88),ke(-55.5,0,44.5),ke(-7.5,12.4,89.5),ke(16.5,0,-86),ke(-84,0,20,.5),Is(2,16,6.8),Is(-80,2.66,91.5),Is(-50,0,52.5,.4),Is(58,30,-90,.5),Is(-40,0,20,-.6),go(-36,0,59.5,0),go(-43.5,0,58.3,1.5708),go(24,0,64,0),ni(-78,0,4,.3),ni(-74,0,-8,1.2),ni(-86,0,-14,0),ni(-44,0,74,.6),es(-30,0,8,.6),es(30,0,-6,-2),es(-82,0,78,1.2),es(78,0,24,-.8),es(90,0,36,2.4),es(-78,0,-60,.2),es(14,0,82,3),Ve(-46,0,50.5),Ve(-45,0,51.6),Ve(24,0,44),Ve(-12,0,84),Ve(-10.5,0,85.5),Ve(-64,0,-74),Ve(70,0,66),Ve(-60,0,8),O(5,40,46,{
+rStep:9,hStep:4,speed:.1,scale:1.4
+}
+),f(new w.SphereGeometry(13,14,10).translate(-130,128,-190),S);
+for(let m=0;
+m<12;
+m++){
+let E=m/12*vt,z=new w.BoxGeometry(6.5,.9,.9);
+z.rotateZ(E),z.translate(-130+Math.cos(E)*20,128+Math.sin(E)*20,-190),f(z,S)
+}
+for(let m=0;
+m<26;
+m++){
+let E=m*(vt/26)+.2,z=126+m%4*12,_=Math.cos(E)*z,H=Math.sin(E)*z,J=34+m*7%18,lt=9+m%3*3;
+f(new w.CylinderGeometry(1.4,2.2,J,7).translate(_,J/2,H),P);
+for(let ct=0;
+ct<4;
+ct++){
+let tt=new w.SphereGeometry(lt*(ct?.6:.9),8,6);
+tt.scale(1,.55,1),tt.translate(_+(ct?Math.cos(ct*2.1)*lt*.6:0),J+ct%2,H+(ct?Math.sin(ct*2.1)*lt*.6:0)),f(tt,L)
+}
+
+}
+for(let[m,E,z,_]of[[170,-210,60,55],[-210,-140,50,42],[220,90,70,60],[-70,240,80,50]])f(new w.ConeGeometry(z,_,6).translate(m,_/2,E),Z);
+for(let[m,E,z,_]of[[80,90,-200,1.1],[-50,98,-220,1.3],[180,80,-70,.9],[-190,84,60,1.1],[50,94,210,1.2]])for(let H=0;
+H<6;
+H++)l(m+(H-2.5)*5*_,E+Math.sin(H*1.7)*2.5*_,z,(4+H%3)*_,{
+seg:9
+}
+);
+for(let[m,E,z]of[[-46,22.2,-46],[18,28.2,-30],[-28,25.2,54],[48,30.6,-44],[-3.5,20,3.5],[70,25,-70],[-32,34.6,-14],[62,32.2,44],[-70,40.2,-80],[76,42.2,72],[64,30,-88],[-6,12.4,88]])h(m,E,z);
+for(let[m,E,z]of[[-64,0,2],[66,0,26],[4,0,-62],[-60,0,66],[40,0,-68],[-70,0,-66],[66,0,60],[-8,0,76],[30,0,-12],[-28,0,24],[-66,0,-34],[56,0,26],[-88,0,-76],[88,0,-50],[-40,0,88],[88,0,8],[16,0,90]])c(m,E,z);
+for(let[m,E,z]of[[0,6,15],[0,11,-10.5],[0,16,-6.5],[-24,0,0],[24,0,0],[0,0,-30],[-46,22.2,-46],[18,28.2,0],[-28,25.2,54],[63.5,0,-57],[-50,0,47],[-32,34.6,-12],[48,0,24],[-56,17.2,12],[10,0,40],[-40,0,-46],[30,0,-46],[-70,40.2,-80],[76,42.2,72],[-80,38.2,44],[82,38.2,-16],[-18,40.2,-82],[28,42.2,82],[64,30,-88],[70,25,-70],[-6,12.4,88],[-80,0,80],[84,5.6,30],[22,0,-88],[-77.3,1,-51.3],[-76,0,0],[46,0,68]])d(m,E,z);
+for(let[m,E,z]of[[-64,0,2],[66,0,26],[4,0,-62],[-60,0,62],[40,0,-66],[-46,22.2,-46],[18,28.2,-30],[-28,25.2,54],[48,30.6,-44],[62,32.2,44],[-56,17.2,12],[10.5,11,-10.5],[70,25,-70],[63.5,0,-57],[-52,0,44],[56,18.2,8],[-8,0,76],[24,0,6],[-70,40.2,-80],[76,42.2,72],[-80,38.2,44],[82,38.2,-16],[64,30,-88],[-6,12.4,88],[-80,0,80],[84,3,34],[22,0,-84],[-78,0,-44]])e.arenaSpawns.push(new w.Vector3(m,E,z));
+return n.finish(),e
+}

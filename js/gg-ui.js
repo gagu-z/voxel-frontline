@@ -92,10 +92,9 @@
       this.hideResult();
     },
 
-    _setBuildSlots: function (visible) {
-      if (VF.UI && VF.UI.setArenaKnifeSlot) VF.UI.setArenaKnifeSlot(false);
-      const slots = document.querySelectorAll('#hotbar .slot.build');
-      for (let i = 0; i < slots.length; i++) slots[i].classList.toggle('hidden', !visible);
+    _setBuildSlots: function () {
+      if (VF.UI && VF.UI.syncHotbarLayout) VF.UI.syncHotbarLayout();
+      if (VF.UI && VF.UI.syncBuildHud) VF.UI.syncBuildHud();
     },
 
     _bind: function () {
@@ -346,6 +345,15 @@
     /* ─────────────── 结算：按武器等级排名（文档 7.2） ─────────────── */
 
     showResult: function (match, won) {
+      const self = this;
+      const reveal = function () {
+        self._revealResult(match, won);
+      };
+      if (VF.WeaponInspect && VF.WeaponInspect.play) VF.WeaponInspect.play(reveal);
+      else reveal();
+    },
+
+    _revealResult: function (match, won) {
       const e = els();
       if (!e || !e.result) return;
       const rows = match.ranking();

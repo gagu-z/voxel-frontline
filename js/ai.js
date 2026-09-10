@@ -1198,7 +1198,13 @@
       const playerTeam = this.world._playerTeam || 'ally';
       if (teamless || unit.team !== playerTeam) {
         if (fromPlayer) {
-          this._registerPlayerKill();
+          this._registerPlayerKill({
+            weaponId: (opts && opts.weaponId) || null,
+            headshot: !!(opts && opts.headshot),
+            x: deathPos && deathPos.x,
+            y: deathPos && deathPos.y,
+            z: deathPos && deathPos.z,
+          });
         } else if (global.VF.Audio) {
           global.VF.Audio.play('kill');
         }
@@ -1241,12 +1247,24 @@
   const MK_WINDOW_MS = 3500;
   const MK_LABELS = ['', '', '双杀', '三杀', '四杀', '五杀', '六杀', '超神'];
 
-  AI.prototype._registerPlayerKill = function () {
+  AI.prototype._registerPlayerKill = function (opts) {
     const now = performance.now();
     if (!this._mkAt || now - this._mkAt > MK_WINDOW_MS) this._mkCount = 0;
     this._mkCount += 1;
     this._mkAt = now;
     const n = this._mkCount;
+    if (global.VF.Career && global.VF.Career.noteKill) {
+      global.VF.Career.noteKill({
+        weaponId:
+          (opts && opts.weaponId) ||
+          (global.VF.game && global.VF.game.weapons && global.VF.game.weapons.current) ||
+          null,
+        headshot: !!(opts && opts.headshot),
+        x: opts && opts.x,
+        y: opts && opts.y,
+        z: opts && opts.z,
+      });
+    }
     const pitch = 1 + Math.min(0.5, (n - 1) * 0.09);
     if (global.VF.Audio) {
       global.VF.Audio.play('kill', { pitch: pitch, streak: n });
@@ -1735,9 +1753,9 @@
         if (this._insideBuilding(x, z, BUILDING_SPAWN_MARGIN)) continue;
         if (this._pathCrossesLandmark(pos.x, pos.z, x, z)) continue;
         if (this._pathCrossesBuilding(pos.x, pos.z, x, z)) continue;
-        if (!this._legClimbable(pos.x, pos.z, x, z)) continue;
-        const y = this._clearStandY(x, z);
-        if (y == null) continue;
+        if (!this._legClimbable(pos.x, pos.z, x, z, pos.y)) continue;
+        const y = this._floorBelow(x, z, pos.y);
+        if (this._soldierOverlaps(x, y, z) && !this._onRampCell(x, z)) continue;
         return new THREE.Vector3(x, y, z);
       }
     }
@@ -1768,8 +1786,11 @@
     return false;
   };
 
-  /** True if (x,z) sits on a stair/door prop — a cell you climb, not route past. */
+  /** True if (x,z) sits on a stair/door prop or a marked voxel-stair column. */
   AI.prototype._onRampCell = function (x, z) {
+    if (this.world.isStairColumn && this.world.isStairColumn(Math.floor(x), Math.floor(z))) {
+      return true;
+    }
     const props = this.world.props;
     if (!props) return false;
     for (let i = 0; i < props.length; i++) {
@@ -1780,33 +1801,212 @@
     return false;
   };
 
+  /** Cardinal neighbors whose floor is within 0.85m of y. A 1-wide rail/lip
+   *  has support on only one axis; a real deck or stair flight has both. */
+  AI.prototype._deckAxes = function (x, z, y) {
+    const gyE = this._floorBelow(x + 1, z, y);
+    const gyW = this._floorBelow(x - 1, z, y);
+    const gyN = this._floorBelow(x, z + 1, y);
+    const gyS = this._floorBelow(x, z - 1, y);
+    const nx = (Math.abs(gyE - y) < 0.85 ? 1 : 0) + (Math.abs(gyW - y) < 0.85 ? 1 : 0);
+    const nz = (Math.abs(gyN - y) < 0.85 ? 1 : 0) + (Math.abs(gyS - y) < 0.85 ? 1 : 0);
+    return { nx: nx, nz: nz };
+  };
+
+  /** True on a 1-block strip (rail, stair lip) — not a stair column. */
+  AI.prototype._isNarrowLip = function (x, z, y) {
+    if (this._onRampCell(x, z)) return false;
+    const a = this._deckAxes(x, z, y);
+    return a.nx === 0 || a.nz === 0;
+  };
+
+  /** Standing above street / on stairs — do not break voxels or step off. */
+  AI.prototype._stayOnDeck = function (unit) {
+    const pos = unit.mesh.position;
+    if (this._onRampCell(pos.x, pos.z)) return true;
+    const streetCap = (this.world && this.world._dGy != null ? this.world._dGy : 8) + 1.5;
+    const low = this._floorBelow(pos.x, pos.z, Math.min(pos.y, streetCap));
+    return pos.y - low > 1.6;
+  };
+
+  /** Same-level stand that is not a 1-wide rail. */
+  AI.prototype._sameDeckStand = function (x, z, fromY) {
+    const y = this._floorBelow(x, z, fromY);
+    if (Math.abs(y - fromY) > 1.15) return null;
+    if (this._soldierOverlaps(x, y, z)) return null;
+    if (this._inRiver(x, z)) return null;
+    if (this._isNarrowLip(x, z, y)) return null;
+    return y;
+  };
+
+  /** Nudge off a rail / inner corner onto the same floor. */
+  AI.prototype._unstickDeck = function (unit) {
+    const pos = unit.mesh.position;
+    const y0 = pos.y;
+    for (let r = 0.4; r <= 2.6; r += 0.4) {
+      for (let a = 0; a < 8; a++) {
+        const ang = (a * Math.PI) / 4;
+        const x = pos.x + Math.cos(ang) * r;
+        const z = pos.z + Math.sin(ang) * r;
+        const y = this._sameDeckStand(x, z, y0);
+        if (y == null) continue;
+        pos.set(x, y, z);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * Next stair cell around a switchback. BFS along same-height treads until a
+   * one-step rise/drop appears, then walk the first cell of that path — never
+   * a straight XZ shortcut through the inner corner, and never ping-pong on
+   * the landing.
+   */
+  AI.prototype._nextStairStep = function (unit, goalPos) {
+    const pos = unit.mesh.position;
+    if (!this.world.isStairColumn || !this._onRampCell(pos.x, pos.z)) return null;
+    const wantUp = goalPos && goalPos.y > pos.y + 1.15;
+    const wantDown = goalPos && goalPos.y < pos.y - 1.15;
+    const ix = Math.floor(pos.x);
+    const iz = Math.floor(pos.z);
+    const dirs = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+    const seen = {};
+    seen[ix + ',' + iz] = 1;
+    const q = [{ x: ix, z: iz, first: null, dist: 0 }];
+    let qi = 0;
+    const gyLo = pos.y - 1.3;
+    const gyHi = pos.y + 1.3;
+    while (qi < q.length) {
+      const cur = q[qi++];
+      if (cur.dist >= 16) continue;
+      for (let d = 0; d < 4; d++) {
+        const x = cur.x + dirs[d][0];
+        const z = cur.z + dirs[d][1];
+        const ck = x + ',' + z;
+        if (seen[ck]) continue;
+        if (!this.world.isStairColumn(x, z)) continue;
+        const treads = this.world.stairTreadYs ? this.world.stairTreadYs(x, z) : [];
+        let stand = null;
+        for (let t = 0; t < treads.length; t++) {
+          const s = treads[t] + 1;
+          if (s < gyLo || s > gyHi) continue;
+          if (stand == null) stand = s;
+          else if (wantDown) {
+            if (s < stand) stand = s;
+          } else if (s > stand) stand = s;
+        }
+        if (stand == null) continue;
+        if (wantUp && stand < pos.y - 0.12) continue;
+        if (wantDown && stand > pos.y + 0.12) continue;
+        seen[ck] = 1;
+        const px = x + 0.5;
+        const pz = z + 0.5;
+        const first = cur.first || { x: px, z: pz, y: stand + 0.04 };
+        if (cur.first == null && !this._legClimbable(pos.x, pos.z, px, pz, pos.y)) continue;
+        if (wantUp && stand > pos.y + 0.22) return first;
+        if (wantDown && stand < pos.y - 0.22) return first;
+        q.push({ x: x, z: z, first: first, dist: cur.dist + 1 });
+      }
+    }
+    return null;
+  };
+
   /**
    * A leg is only usable if the unit can actually WALK its whole length, not
-   * just stand at the far end. Free-standing voxel obstacles (crates, blocks,
-   * pillars) live in none of the building/landmark lists the router vets, so a
-   * leg aimed past a cube used to test "clear" — its endpoint stands fine on the
-   * open ground beyond — and the mover then ground straight into the cube face
-   * (直直朝墙里走，不会绕道). Walk the ground height along the segment: any rise
-   * steeper than a single step (STEP_UP) is an un-steppable wall, so reject the
-   * leg and let the fan pick a tangent that rounds the obstacle. Stair/door
-   * ramps are exempt so legitimate climbs still route.
+   * just stand at the far end. Height is read at the unit's current level
+   * (_floorBelow) so a rooftop above a street cell is not treated as a wall.
+   * Stair columns may rise a step at a time; a non-stair body overlap is a wall.
    */
-  AI.prototype._legClimbable = function (x0, z0, x1, z1) {
+  AI.prototype._legClimbable = function (x0, z0, x1, z1, fromY) {
     const dx = x1 - x0;
     const dz = z1 - z0;
     const len = Math.hypot(dx, dz);
     if (len < 0.01) return true;
     const n = Math.max(1, Math.ceil(len / 0.7));
-    let prev = this._groundAt(x0, z0);
+    let prev = fromY != null ? fromY : this._floorBelow(x0, z0, 40);
     for (let i = 1; i <= n; i++) {
       const t = i / n;
       const x = x0 + dx * t;
       const z = z0 + dz * t;
-      const gy = this._groundAt(x, z);
-      if (gy - prev > STEP_UP + 0.2 && !this._onRampCell(x, z)) return false;
+      const gy = this._floorBelow(x, z, prev + 0.85);
+      const ramp = this._onRampCell(x, z);
+      if (gy - prev > STEP_UP + 0.2 && !ramp) return false;
+      if (!ramp && this._soldierOverlaps(x, gy, z)) return false;
       prev = gy;
     }
     return true;
+  };
+
+  /**
+   * When the goal is on another floor, walk to the nearest stair tread at our
+   * height instead of grinding the XZ shortcut into a wall.
+   */
+  AI.prototype._climbGoal = function (unit, goalPos) {
+    if (!goalPos) return null;
+    const pos = unit.mesh.position;
+    const dy = goalPos.y - pos.y;
+    const onRamp = this._onRampCell(pos.x, pos.z);
+    if (onRamp) {
+      const sameFloor =
+        Math.abs(dy) < 1.4 && this._legClimbable(pos.x, pos.z, goalPos.x, goalPos.z, pos.y);
+      if (!sameFloor) {
+        const next = this._nextStairStep(unit, goalPos);
+        if (next) {
+          if (!this._tmpClimb) this._tmpClimb = new THREE.Vector3();
+          return this._tmpClimb.set(next.x, next.y, next.z);
+        }
+      }
+    }
+    const list = this.world && this.world._stairColList;
+    if (!list || !list.length) return null;
+    if (Math.abs(dy) < 2.2) return null;
+    const wantUp = dy > 0;
+    const gx = goalPos.x - pos.x;
+    const gz = goalPos.z - pos.z;
+    const cand = [];
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      const x = c.x + 0.5;
+      const z = c.z + 0.5;
+      const treads = this.world.stairTreadYs ? this.world.stairTreadYs(c.x, c.z) : [c.y];
+      for (let t = 0; t < treads.length; t++) {
+        const tread = (treads[t] != null ? treads[t] : 0) + 1;
+        if (wantUp) {
+          if (tread < pos.y - 1.3 || tread > pos.y + 4.2) continue;
+        } else if (tread > pos.y + 1.3 || tread < pos.y - 4.2) continue;
+        const d = Math.hypot(x - pos.x, z - pos.z);
+        if (d < 0.35 || d > 58) continue;
+        const ideal = wantUp ? pos.y + 1.0 : pos.y - 1.0;
+        const toward = gx * (x - pos.x) + gz * (z - pos.z);
+        cand.push({
+          x: x,
+          z: z,
+          y: tread + 0.04,
+          score: d + Math.abs(tread - ideal) * 0.4 - Math.min(10, toward * 0.06),
+        });
+      }
+    }
+    if (!cand.length) return null;
+    cand.sort(function (a, b) {
+      return a.score - b.score;
+    });
+    let pick = cand[0];
+    const maxCheck = Math.min(12, cand.length);
+    for (let i = 0; i < maxCheck; i++) {
+      const c = cand[i];
+      if (this._legClimbable(pos.x, pos.z, c.x, c.z, pos.y)) {
+        pick = c;
+        break;
+      }
+    }
+    if (!this._tmpClimb) this._tmpClimb = new THREE.Vector3();
+    return this._tmpClimb.set(pick.x, pick.y, pick.z);
   };
 
   /** March on goalPos, refreshing the routed waypoint as we arrive, stall out,
@@ -1814,12 +2014,14 @@
    *  range is still the nearest enemy, so the unit keeps advancing on them. */
   AI.prototype._advanceOn = function (unit, goalPos, dt) {
     unit.state = 'advance';
+    const climb = this._climbGoal(unit, goalPos);
+    if (climb) goalPos = climb;
     unit._seekCd = (unit._seekCd || 0) - dt;
     const stale =
       !unit.seekTarget ||
       unit._seekCd <= 0 ||
       !this._isWalkable(unit.seekTarget.x, unit.seekTarget.z, unit.team);
-    if (stale) {
+    if (stale && !climb) {
       unit.seekTarget = this._seekWaypoint(unit, goalPos);
       unit._seekCd = 1.0 + Math.random() * 0.8;
     }
@@ -1828,8 +2030,8 @@
     // the obstacle on one side for a beat so the unit rounds the corner instead
     // of grinding straight into it (the 卡墙 case). Only armed after sustained
     // blockage below, and it decays the moment the unit moves freely again.
-    let aim = unit.seekTarget || goalPos;
-    if ((unit._wallFollow || 0) > 0) {
+    let aim = climb || unit.seekTarget || goalPos;
+    if (!climb && (unit._wallFollow || 0) > 0) {
       unit._wallFollow -= dt;
       aim = this._wallFollowAim(unit, goalPos) || aim;
     }
@@ -2269,6 +2471,7 @@
     const t = w.get(x, y, z);
     if (t === BLOCK.AIR || t === BLOCK.WATER) return false;
     if (t === BLOCK.BEDROCK) return false;
+    if (w.isStairVoxel && w.isStairVoxel(x, y, z)) return false;
     if (w._isTerrainFill && w._isTerrainFill(x, y, z)) return false;
     if (w._isBaseKeepClear && w._isBaseKeepClear(x, z, 0) && y <= 6) return false;
     if (t === BLOCK.METAL && w.breakBlock) return !!w.breakBlock(x, y, z);
@@ -2321,28 +2524,22 @@
   AI.prototype._resolveEmbed = function (unit) {
     const pos = unit.mesh.position;
     if (!this._soldierOverlaps(pos.x, pos.y, pos.z)) return false;
+    const y0 = pos.y;
 
-    for (let dy = 0.25; dy <= 4; dy += 0.25) {
-      if (!this._soldierOverlaps(pos.x, pos.y + dy, pos.z)) {
-        pos.y += dy;
+    if (this._unstickDeck(unit) && !this._soldierOverlaps(pos.x, pos.y, pos.z)) return true;
+
+    for (let dy = 0.2; dy <= STEP_UP + 0.15; dy += 0.2) {
+      const y = y0 + dy;
+      if (this._soldierOverlaps(pos.x, y, pos.z)) continue;
+      if (this._onRampCell(pos.x, pos.z) || !this._isNarrowLip(pos.x, pos.z, y)) {
+        pos.y = y;
         return true;
       }
     }
-    for (let r = 0.4; r <= 4; r += 0.4) {
-      for (let a = 0; a < 8; a++) {
-        const ang = (a * Math.PI) / 4;
-        const x = pos.x + Math.cos(ang) * r;
-        const z = pos.z + Math.sin(ang) * r;
-        const y = this._clearStandY(x, z);
-        if (y != null && this._teamSide(x, z) === unit.team && !this._inRiver(x, z)) {
-          pos.set(x, y, z);
-          return true;
-        }
-      }
-    }
-    this._breakOverlapping(unit);
-    const y2 = this._clearStandY(pos.x, pos.z);
-    if (y2 != null) pos.y = y2;
+
+    if (!this._stayOnDeck(unit)) this._breakOverlapping(unit);
+    const y2 = this._floorBelow(pos.x, pos.z, pos.y);
+    if (!this._soldierOverlaps(pos.x, y2, pos.z)) pos.y = y2;
     return true;
   };
 
@@ -2373,13 +2570,23 @@
 
     if (unit._moveBlocked) {
       unit.blockTime = (unit.blockTime || 0) + dt;
-      if (allowJump && unit.onGround && unit.blockTime > 0.35 && (unit.velY || 0) <= 0.05) {
+      if (
+        allowJump &&
+        !this._stayOnDeck(unit) &&
+        unit.onGround &&
+        unit.blockTime > 0.35 &&
+        (unit.velY || 0) <= 0.05
+      ) {
         unit.velY = JUMP_VEL;
         unit.onGround = false;
         unit.jumpCd = JUMP_COOLDOWN;
       }
-      if (unit.blockTime > 0.75) {
-        if (!this._breakAhead(unit)) this._breakOverlapping(unit);
+      if (unit.blockTime > 0.55) {
+        if (this._stayOnDeck(unit) || this._isNarrowLip(pos.x, pos.z, pos.y)) {
+          this._unstickDeck(unit);
+        } else if (!this._breakAhead(unit)) {
+          this._breakOverlapping(unit);
+        }
         unit.blockTime = 0.2;
       }
     } else {
@@ -2387,10 +2594,14 @@
     }
 
     if ((unit.stuckTime || 0) > 1.2) {
-      this._breakOverlapping(unit);
-      this._resolveEmbed(unit);
+      if (this._stayOnDeck(unit) || this._isNarrowLip(pos.x, pos.z, pos.y)) {
+        this._unstickDeck(unit);
+      } else {
+        this._breakOverlapping(unit);
+        this._resolveEmbed(unit);
+      }
       unit.stuckTime = 0.4;
-      if (allowJump && unit.onGround) {
+      if (allowJump && !this._stayOnDeck(unit) && unit.onGround) {
         unit.velY = JUMP_VEL * 0.85;
         unit.onGround = false;
         unit.jumpCd = JUMP_COOLDOWN;
@@ -2411,16 +2622,17 @@
         unit.velY = 0;
         unit.onGround = true;
       } else {
-        const cy = this._clearStandY(pos.x, pos.z);
-        if (cy != null) {
-          pos.y = cy;
-          unit.velY = 0;
-          unit.onGround = true;
-        } else {
-          this._resolveEmbed(unit);
-          unit.velY = 0;
-          unit.onGround = true;
+        pos.y = gy;
+        if (!this._unstickDeck(unit)) {
+          const cy = this._clearStandY(pos.x, pos.z);
+          if (cy != null && (this._onRampCell(pos.x, pos.z) || !this._isNarrowLip(pos.x, pos.z, cy))) {
+            pos.y = cy;
+          } else {
+            this._resolveEmbed(unit);
+          }
         }
+        unit.velY = 0;
+        unit.onGround = true;
       }
     } else if (pos.y > gy + 0.15) {
       unit.onGround = false;
@@ -2429,6 +2641,11 @@
     if (this._soldierOverlaps(pos.x, pos.y, pos.z)) {
       if (unit.velY > 0) unit.velY = 0;
       this._resolveEmbed(unit);
+    } else if (
+      unit.onGround &&
+      this._isNarrowLip(pos.x, pos.z, pos.y)
+    ) {
+      this._unstickDeck(unit);
     }
   };
 
@@ -2455,9 +2672,39 @@
       return false;
     }
 
-    if (!this._soldierOverlaps(pos.x, pos.y, pos.z)) return true;
+    if (!this._soldierOverlaps(pos.x, pos.y, pos.z)) {
+      const gy = this._floorBelow(pos.x, pos.z, beforeY);
+      if (beforeY - gy > 1.35) {
+        pos[axis] = before;
+        return false;
+      }
+      return true;
+    }
 
-    pos.y = beforeY + STEP_UP;
+    let lifted = false;
+    if (this.world.isStairColumn && this.world.isStairColumn(Math.floor(pos.x), Math.floor(pos.z))) {
+      const treads = this.world.stairTreadYs
+        ? this.world.stairTreadYs(Math.floor(pos.x), Math.floor(pos.z))
+        : [];
+      let stand = null;
+      for (let t = 0; t < treads.length; t++) {
+        const s = treads[t] + 1 + 0.04;
+        const need = s - beforeY;
+        if (need > 0.02 && need <= STEP_UP + 0.2 && (stand == null || s < stand)) stand = s;
+      }
+      if (stand != null) {
+        pos.y = stand;
+        lifted = true;
+      }
+    }
+    if (!lifted) {
+      pos.y = beforeY + STEP_UP;
+      if (this._isNarrowLip(pos.x, pos.z, pos.y)) {
+        pos.y = beforeY;
+        pos[axis] = before;
+        return false;
+      }
+    }
     if (
       !this._inRiver(pos.x, pos.z) &&
       !this._insideBuilding(pos.x, pos.z, 0.25) &&
@@ -2570,11 +2817,21 @@
           const az = pa.z + oz;
           const bx = pb.x - ox;
           const bz = pb.z - oz;
-          if (this._isWalkable(ax, az, a.team) && !this._soldierOverlaps(ax, pa.y, az)) {
+          if (
+            this._isWalkable(ax, az, a.team) &&
+            !this._soldierOverlaps(ax, pa.y, az) &&
+            Math.abs(this._floorBelow(ax, az, pa.y) - pa.y) <= 1.2 &&
+            !this._isNarrowLip(ax, az, pa.y)
+          ) {
             pa.x = ax;
             pa.z = az;
           }
-          if (this._isWalkable(bx, bz, b.team) && !this._soldierOverlaps(bx, pb.y, bz)) {
+          if (
+            this._isWalkable(bx, bz, b.team) &&
+            !this._soldierOverlaps(bx, pb.y, bz) &&
+            Math.abs(this._floorBelow(bx, bz, pb.y) - pb.y) <= 1.2 &&
+            !this._isNarrowLip(bx, bz, pb.y)
+          ) {
             pb.x = bx;
             pb.z = bz;
           }

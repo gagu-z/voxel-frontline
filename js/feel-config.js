@@ -40,7 +40,10 @@
     poseY: 0.05,
     poseZ: 0.06,
     kickFloor: -0.04,
-    kickCeil: 0.5
+    kickCeil: 0.5,
+    equipRate: 3.2,
+    equipDip: 0.32,
+    equipPitch: 0.9
   },
   shake: {
     max: 0.48,
@@ -83,9 +86,15 @@
   },
   camera: {
     hipFov: 70,
-    adsFov: 48,
+    adsFov: 52,
     mouseSens: 0.0022,
-    adsSens: 0.0011
+    adsSens: 0.0011,
+    adsFovIn: 16,
+    adsFovOut: 8,
+    adsBlendIn: 14,
+    adsBlendOut: 10,
+    camRoll: 0.022,
+    stairSmooth: 18
   },
   weapons: {
     ar: {
@@ -120,11 +129,13 @@
     fireRateMul: 1,
     accuracyMul: 1.15
   },
-  playerMove: {
+    playerMove: {
     moveSpeed: 8.5,
     sprintMul: 1.5,
     crouchMul: 0.48,
-    adsMul: 0.55
+    adsMul: 0.55,
+    slideMul: 1.35,
+    slideDur: 0.45
   },
   airStrike: {
     size: 2.1,

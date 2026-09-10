@@ -9,7 +9,7 @@
 
     init() {
       this.els = {
-        healthFill: document.getElementById('health-fill'),
+        healthFill: document.getElementById('hp-fill'),
         armorFill: document.getElementById('armor-fill'),
         healthText: document.getElementById('health-text'),
         armorText: document.getElementById('armor-text'),
@@ -24,6 +24,8 @@
         ammoMag: document.getElementById('ammo-mag'),
         ammoReserve: document.getElementById('ammo-reserve'),
         ammoReload: document.getElementById('ammo-reload'),
+        ammoPips: document.getElementById('ammo-pips'),
+        ammoMags: document.getElementById('ammo-mags'),
         skillHud: document.getElementById('skill-hud'),
         skillActive: document.getElementById('skill-active'),
         skillPassive: document.getElementById('skill-passive'),
@@ -141,8 +143,21 @@
       // Top-right wave/squad panel retired — timer lives in #match-clock
       const waveInfo = document.getElementById('wave-info');
       if (waveInfo) waveInfo.classList.add('hidden');
+      if (this.syncBuildHud) this.syncBuildHud();
+      if (this.syncHotbarLayout) this.syncHotbarLayout();
       if (this.syncWeaponLocks) this.syncWeaponLocks();
       if (global.VF && global.VF.syncGameBackBtn) global.VF.syncGameBackBtn();
+    },
+
+    /**
+     * 部署核 / 掩体建材 only exist where building does, i.e. 核心攻防. Every other
+     * mode already refuses to build, so the counters were dead chrome there.
+     */
+    syncBuildHud() {
+      const GM = global.VF.GameModes;
+      const building = !GM || !GM.param || GM.param('building', true) !== false;
+      const res = document.getElementById('resources');
+      if (res) res.classList.toggle('hidden', !building);
     },
 
     hideHud() {
@@ -168,41 +183,32 @@
     },
 
     updateVitals(hp, armor) {
-      const h = Math.max(0, Math.min(100, Math.round(hp)));
+      const p = global.VF.game && global.VF.game.player;
+      const maxHp = Math.max(1, (p && p.maxHealth) || 100);
+      const maxAr = Math.max(1, (p && p.maxArmor) || 100);
+      const h = Math.max(0, Math.round(hp));
       const a = armor != null ? Math.round(armor) : null;
-      if (h === this._cachedHp && a === this._cachedArmor) return;
+      if (h === this._cachedHp && a === this._cachedArmor &&
+          maxHp === this._cachedMaxHp && maxAr === this._cachedMaxAr) return;
       this._cachedHp = h;
       this._cachedArmor = a;
+      this._cachedMaxHp = maxHp;
+      this._cachedMaxAr = maxAr;
 
-      const blocksTotal = 16;
-      const filled = Math.round((h / 100) * blocksTotal);
-      const bar = '█'.repeat(filled) + '░'.repeat(blocksTotal - filled);
-
-      if (this.els.hpBlocks) {
-        this.els.hpBlocks.textContent = bar;
-        this.els.hpBlocks.classList.remove('hp-mid', 'hp-low');
-        if (h <= 30) this.els.hpBlocks.classList.add('hp-low');
-        else if (h <= 60) this.els.hpBlocks.classList.add('hp-mid');
-      }
       if (this.els.hpNum) this.els.hpNum.textContent = h;
-
-      if (a != null && this.els.armorBlocks) {
-        const armorTotal = 8;
-        const armorFilled = Math.round((Math.max(0, Math.min(100, a)) / 100) * armorTotal);
-        this.els.armorBlocks.textContent =
-          '█'.repeat(armorFilled) + '░'.repeat(armorTotal - armorFilled);
-      }
-      if (this.els.armorNum && a != null) this.els.armorNum.textContent = a;
-
       if (this.els.healthFill) {
-        this.els.healthFill.style.transform = 'scaleX(' + h / 100 + ')';
+        this.els.healthFill.style.transform = 'scaleX(' + Math.max(0, Math.min(1, h / maxHp)) + ')';
       }
+      const hpTrack = this.els.healthFill && this.els.healthFill.parentElement;
+      if (hpTrack) {
+        const pct = h / maxHp;
+        hpTrack.classList.toggle('hp-mid', pct > 0.3 && pct <= 0.6);
+        hpTrack.classList.toggle('hp-low', pct <= 0.3);
+      }
+
+      if (a != null && this.els.armorNum) this.els.armorNum.textContent = a;
       if (this.els.armorFill && a != null) {
-        this.els.armorFill.style.transform = 'scaleX(' + Math.max(0, Math.min(100, a)) / 100 + ')';
-      }
-      if (this.els.healthText) this.els.healthText.textContent = h;
-      if (this.els.armorText && a != null) {
-        this.els.armorText.textContent = a;
+        this.els.armorFill.style.transform = 'scaleX(' + Math.max(0, Math.min(1, a / maxAr)) + ')';
       }
 
       if (h < this._lastHp) this.damageFlash();
@@ -217,17 +223,110 @@
       if (this.els.blockCount) this.els.blockCount.textContent = blocks;
     },
 
-    updateAmmo(mag, reserve) {
+    updateAmmo(mag, reserve, magSize) {
       const wrap = document.getElementById('ammo');
       const melee = mag == null;
-      if (wrap) wrap.classList.toggle('melee', melee);
+      if (mag != null && (magSize == null || magSize <= 0)) {
+        const wpn = global.VF.game && global.VF.game.weapons;
+        const def = wpn && wpn.getDef && wpn.getDef();
+        if (def && !def.melee && def.magSize) magSize = def.magSize;
+      }
+      if (wrap) {
+        wrap.classList.toggle('melee', melee);
+        wrap.classList.toggle('throw', arguments[3] === 'throw');
+      }
       if (melee) {
         if (this.els.ammoMag) this.els.ammoMag.textContent = '近战';
-        if (this.els.ammoReserve) this.els.ammoReserve.textContent = '';
+        if (this.els.ammoReserve) this.els.ammoReserve.textContent = '0';
+        this._fillAmmoPips(0, 0, 0);
+        this._fillAmmoMags(0, 0);
+        this.syncLoadoutAmmo();
         return;
       }
-      this.els.ammoMag.textContent = mag;
-      this.els.ammoReserve.textContent = reserve;
+      if (arguments[3] === 'throw') {
+        if (this.els.ammoMag) this.els.ammoMag.textContent = mag;
+        if (this.els.ammoReserve) this.els.ammoReserve.textContent = '0';
+        this._fillAmmoPips(0, 0, 0);
+        this._fillAmmoMags(0, 0);
+        this.syncLoadoutAmmo();
+        return;
+      }
+      if (this.els.ammoMag) this.els.ammoMag.textContent = mag;
+      if (this.els.ammoReserve) this.els.ammoReserve.textContent = Math.max(0, reserve | 0);
+      this._fillAmmoPips(mag, reserve, magSize || mag);
+      this._fillAmmoMags(reserve, magSize || mag);
+      this.syncLoadoutAmmo();
+    },
+
+    _fillAmmoPips(mag, reserve, magSize) {
+      const magEl = this.els.ammoPips;
+      if (!magEl) return;
+      mag = Math.max(0, mag | 0);
+      magSize = Math.max(0, magSize | 0);
+      const tallyMax = 50;
+      let ticks = mag;
+      if (magSize > tallyMax) {
+        ticks = Math.round((mag / magSize) * tallyMax);
+      } else if (ticks > tallyMax) {
+        ticks = tallyMax;
+      }
+      if (magEl.childNodes.length !== ticks) {
+        magEl.innerHTML = '';
+        for (let i = 0; i < ticks; i++) magEl.appendChild(document.createElement('span'));
+      }
+    },
+
+    _fillAmmoMags(reserve, magSize) {
+      const el = this.els.ammoMags;
+      if (!el) return;
+      const slots = 6;
+      if (el.childNodes.length !== slots) {
+        el.innerHTML = '';
+        for (let i = 0; i < slots; i++) el.appendChild(document.createElement('i'));
+      }
+      reserve = Math.max(0, reserve | 0);
+      magSize = Math.max(0, magSize | 0);
+      const extra = magSize > 0 ? Math.ceil(reserve / magSize) : 0;
+      const shown = Math.min(slots, extra);
+      for (let i = 0; i < slots; i++) {
+        el.childNodes[i].className = i < shown ? 'on' : 'off';
+      }
+    },
+
+    syncLoadoutAmmo() {
+      const w = global.VF.game && global.VF.game.weapons;
+      const defs = global.VF.WEAPONS || {};
+      const E = global.VF.Economy;
+      const T = global.VF.Throwables;
+      const slots = this.els.hotbarSlots;
+      if (!slots) return;
+      slots.forEach(function (el) {
+        const ammoEl = el.querySelector('.slot-ammo');
+        if (!ammoEl) return;
+        const slot = el.dataset.slot;
+        if (slot === '3') {
+          ammoEl.textContent = '—';
+          return;
+        }
+        if (slot === 'throw') {
+          const left = T && T.remaining ? T.remaining() : 0;
+          ammoEl.textContent = String(left);
+          return;
+        }
+        if (slot === '4' || slot === '5') {
+          ammoEl.textContent = '';
+          return;
+        }
+        const n = Number(slot);
+        if (n < 1 || n > 2 || !w) return;
+        const id = (E && E.weaponForSlot ? E.weaponForSlot(n) : null) || (n === 1 ? 'ar' : 'sg');
+        const st = w.state && w.state[id];
+        if (!st) {
+          ammoEl.textContent = '';
+          return;
+        }
+        ammoEl.textContent = st.mag + '/' + st.reserve;
+      });
     },
 
     setReloading(on) {
@@ -526,6 +625,18 @@
     },
 
     showVictory(title, sub) {
+      const self = this;
+      const reveal = function () {
+        self._revealVictory(title, sub);
+      };
+      if (global.VF.WeaponInspect && global.VF.WeaponInspect.play) {
+        global.VF.WeaponInspect.play(reveal);
+      } else {
+        reveal();
+      }
+    },
+
+    _revealVictory(title, sub) {
       if (this.hideDeath) this.hideDeath();
       if (this.closeSpawnSelect) this.closeSpawnSelect();
       const bases = global.VF.game && global.VF.game.bases;
@@ -634,36 +745,53 @@
     },
 
     setHotbarSlot(slotNum) {
+      const key = String(slotNum);
       this.els.hotbarSlots.forEach((el) => {
-        el.classList.toggle('active', Number(el.dataset.slot) === slotNum);
+        el.classList.toggle('active', String(el.dataset.slot) === key);
       });
     },
 
     /**
-     * 无建造模式（死斗 / 混战 / 爆破）：4 号位改为匕首，5 号位隐藏。
-     * 枪械模式不调用此方法，4/5 仍整栏隐藏。
+     * Which hotbar slots a mode actually has. The knife only exists where
+     * building is off (死斗 / 混战 / 爆破), the build pair only in 核心攻防, and
+     * 枪械模式 hands out guns by progression so it has neither.
      */
-    setArenaKnifeSlot(on) {
-      const hotbar = document.getElementById('hotbar');
-      const slot4 = document.querySelector('#hotbar .slot[data-slot="4"]');
-      const slot5 = document.querySelector('#hotbar .slot[data-slot="5"]');
-      if (hotbar) hotbar.classList.toggle('arena-knife', !!on);
-      if (slot5) slot5.classList.toggle('hidden', !!on);
-      if (!slot4) return;
-      slot4.classList.remove('hidden');
-      slot4.classList.toggle('build', !on);
-      slot4.classList.toggle('melee', !!on);
-      const icon = slot4.querySelector('.slot-icon');
-      const name = slot4.querySelector('.slot-name');
-      if (on) {
-        slot4.title = '战术匕首 (4)';
-        if (icon) icon.className = 'slot-icon weapon-knife';
-        if (name) name.textContent = '匕首';
-      } else {
-        slot4.title = 'Cover / 掩体 (4)';
-        if (icon) icon.className = 'slot-icon cover-icon';
-        if (name) name.textContent = '掩体';
-      }
+    syncHotbarLayout() {
+      const GM = global.VF.GameModes;
+      const building = !GM || !GM.param || GM.param('building', true) !== false;
+      const M = global.VF.Melee;
+      const knife = !!(M && M.available && M.available());
+      const show = function (sel, on) {
+        const el = document.querySelector('#hotbar .slot[data-slot="' + sel + '"]');
+        if (el) el.classList.toggle('hidden', !on);
+      };
+      show('3', knife);
+      show('4', building);
+      show('5', building);
+      this.syncThrowSlot();
+    },
+
+    /**
+     * Q slot mirrors the throwable the arsenal picked, plus what is left. Owns
+     * its own visibility because Throwables activates after the mode UI has
+     * already laid the bar out.
+     */
+    syncThrowSlot() {
+      const el = document.querySelector('#hotbar .slot[data-slot="throw"]');
+      if (!el) return;
+      const T = global.VF.Throwables;
+      const id = T && T.equipped ? T.equipped() : null;
+      el.classList.toggle('hidden', !id);
+      if (!id) return;
+      const def = global.VF.THROWABLE_CATALOG ? global.VF.THROWABLE_CATALOG[id] : null;
+      const label = def ? def.nameZh || def.name || id : id;
+      const name = el.querySelector('.slot-name');
+      if (name) name.textContent = label;
+      el.title = label + ' (Q)';
+      const left = T.remaining ? T.remaining() : 0;
+      el.classList.toggle('locked', left <= 0);
+      const ammoEl = el.querySelector('.slot-ammo');
+      if (ammoEl) ammoEl.textContent = String(left);
     },
 
     syncWeaponLocks() {
@@ -676,11 +804,22 @@
         if (!global.VF.Economy || !global.VF.Economy.ownsWeapon) return true;
         return global.VF.Economy.ownsWeapon(id);
       };
+      // Slots 1–2 show whatever the arsenal assigned, so the label has to follow.
+      const E = global.VF.Economy;
+      const defs = global.VF.WEAPONS || {};
+      const legacy = { 1: 'ar', 2: 'sg' };
       this.els.hotbarSlots.forEach((el) => {
         const slot = Number(el.dataset.slot);
-        if (slot === 2) el.classList.toggle('locked', !owns('sg'));
-        else if (slot === 3) el.classList.toggle('locked', !owns('sr'));
+        if (slot !== 1 && slot !== 2) return;
+        const id = (E && E.weaponForSlot ? E.weaponForSlot(slot) : null) || legacy[slot];
+        const def = defs[id];
+        if (slot > 1) el.classList.toggle('locked', !owns(id));
+        if (!def) return;
+        const label = el.querySelector('.slot-name');
+        if (label) label.textContent = def.ammoLabel || def.nameZh || def.name;
+        el.title = (def.nameZh || def.name) + ' (' + slot + ')';
       });
+      this.syncLoadoutAmmo();
     },
 
     /**
@@ -691,9 +830,9 @@
      */
     setAiming(aiming, scopeType, blend) {
       blend = blend != null ? blend : aiming ? 1 : 0;
-      const showScope = aiming && scopeType && blend > 0.35;
+      const showScope = aiming && scopeType === 'sniper' && blend > 0.62;
       if (this.els.crosshair) {
-        this.els.crosshair.classList.toggle('ads', !!aiming && !showScope);
+        this.els.crosshair.classList.toggle('ads', blend > 0.18 && !showScope);
         this.els.crosshair.classList.toggle('scoped', !!showScope);
       }
       const sc = this.els.scopeOverlay;

@@ -464,6 +464,7 @@
   }
 
   function returnToHub() {
+    if (VF.Career && VF.Career.finish) VF.Career.finish(null);
     game.teamLocked = false;
     game.lockedTeam = null;
     game.running = false;
@@ -480,6 +481,7 @@
     if (VF.GgMatch && VF.GgMatch.stop) VF.GgMatch.stop();
     if (VF.GgUi && VF.GgUi.leave) VF.GgUi.leave();
     if (VF.Throwables && VF.Throwables.stop) VF.Throwables.stop();
+    if (VF.WeaponInspect && VF.WeaponInspect.cancel) VF.WeaponInspect.cancel();
     if (game.battlefieldEvents && game.battlefieldEvents.stop) game.battlefieldEvents.stop();
     if (document.exitPointerLock) document.exitPointerLock();
     if (VF.UI && VF.UI.hideHud) VF.UI.hideHud();
@@ -722,9 +724,20 @@
 
     const tdm = !!(VF.GameModes && VF.GameModes.isTdm());
     const sd = !!(VF.GameModes && VF.GameModes.isSd());
+    const personalFfa = !!(
+      VF.GameModes &&
+      VF.GameModes.isFfa &&
+      VF.GameModes.isFfa() &&
+      game.mode !== 'pvp'
+    );
     // 枪械模式直接复用 自由混战 的随机地图
     const ffa = !!(VF.GameModes && VF.GameModes.isTeamless && VF.GameModes.isTeamless());
-    if (ffa && game.world && game.world.generateFfaMap) {
+    if (personalFfa && game.world && game.world.generateFfaDistrictMap) {
+      if (game.bases && game.bases.detach) game.bases.detach();
+      game.world.generateFfaDistrictMap(seed);
+      game.world.applyTdmSpawnPoints();
+      game._mapKitLayout = false;
+    } else if (ffa && game.world && game.world.generateFfaMap) {
       // 自由混战 / 枪械模式: a dedicated compact 60×60 arena (环+中心 循环流动) — no
       // kit stamps, no cores, no crystals. Reuses the 死斗 spawn/flow plumbing.
       if (game.bases && game.bases.detach) game.bases.detach();
@@ -1027,6 +1040,7 @@
       game._coinGranted = false;
       game._towerCoinsCharged = false;
       game._towerUnpaid = false;
+      if (VF.Career && VF.Career.start) VF.Career.start();
       if (game.weapons && game.weapons.syncOwnedLoadout) game.weapons.syncOwnedLoadout();
       if (VF.Economy && VF.Economy.applyMatchLoadout) {
         VF.Economy.applyMatchLoadout(game.player, game.weapons);
@@ -1172,6 +1186,7 @@
     if (VF.GgMatch && VF.GgMatch.stop) VF.GgMatch.stop();
     if (VF.GgUi && VF.GgUi.leave) VF.GgUi.leave();
     if (VF.Throwables && VF.Throwables.stop) VF.Throwables.stop();
+    if (VF.WeaponInspect && VF.WeaponInspect.cancel) VF.WeaponInspect.cancel();
     if (game.battlefieldEvents && game.battlefieldEvents.stop) game.battlefieldEvents.stop();
     if (VF.Audio && VF.Audio.setInMatch) VF.Audio.setInMatch(false);
     if (game.mode === 'pvp' && VF.Pvp && VF.Pvp.leaveLobby) {
@@ -1410,7 +1425,13 @@
       }
     }
 
-    if (game.player && game.player.dead && !rangeOpen) {
+    if (VF.WeaponInspect && VF.WeaponInspect.isActive && VF.WeaponInspect.isActive()) {
+      try {
+        VF.WeaponInspect.update(dt);
+      } catch (err) {
+        console.error('[VF] weapon inspect', err);
+      }
+    } else if (game.player && game.player.dead && !rangeOpen) {
       try {
         game.player._updateDeadCam(dt);
       } catch (err) {
@@ -1493,18 +1514,28 @@
       if (!game.levelEditing && game.bases && (game.bases.won || game.bases.lost)) {
         game.running = false;
         if (game.battlefieldEvents && game.battlefieldEvents.stop) game.battlefieldEvents.stop();
-        document.exitPointerLock && document.exitPointerLock();
+        if (!(VF.WeaponInspect && VF.WeaponInspect.isActive && VF.WeaponInspect.isActive())) {
+          document.exitPointerLock && document.exitPointerLock();
+        }
       }
       if (game.mode === 'pvp' && VF.Pvp && VF.Pvp._matchEnded) {
         game.running = false;
         if (game.battlefieldEvents && game.battlefieldEvents.stop) game.battlefieldEvents.stop();
-        document.exitPointerLock && document.exitPointerLock();
+        if (!(VF.WeaponInspect && VF.WeaponInspect.isActive && VF.WeaponInspect.isActive())) {
+          document.exitPointerLock && document.exitPointerLock();
+        }
       } else if (game.mode !== 'pvp' && game.player.dead) {
         game.running = false;
         if (game.battlefieldEvents && game.battlefieldEvents.stop) game.battlefieldEvents.stop();
-        document.exitPointerLock && document.exitPointerLock();
+        if (!(VF.WeaponInspect && VF.WeaponInspect.isActive && VF.WeaponInspect.isActive())) {
+          document.exitPointerLock && document.exitPointerLock();
+        }
       }
-    } else if (game.player && !rangeOpen) {
+    } else if (
+      game.player &&
+      !rangeOpen &&
+      !(VF.WeaponInspect && VF.WeaponInspect.isActive && VF.WeaponInspect.isActive())
+    ) {
       const eye = game.player.getEyePosition();
       game.camera.position.copy(eye);
       if (!game._idleEuler) game._idleEuler = new THREE.Euler(0, 0, 0, 'YXZ');

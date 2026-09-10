@@ -69,6 +69,8 @@
       adsFov: 40,
       scope: 'optic',
       adsSens: 0.7,
+      category: 'assault',
+      modelStyle: 'ak',
     },
     sg: {
       id: 'sg',
@@ -102,6 +104,8 @@
       adsFov: 52,
       scope: 'holo',
       adsSens: 0.85,
+      category: 'shotgun',
+      modelStyle: 'shotgun',
     },
     sr: {
       id: 'sr',
@@ -109,7 +113,7 @@
       name: 'SVD',
       nameZh: 'SVD',
       caliber: '7.62×54R',
-      slot: 3,
+      slot: 1,
       damage: 88,
       fireRate: 0.95,
       magSize: 10,
@@ -135,13 +139,15 @@
       adsFov: 18,
       scope: 'sniper',
       adsSens: 0.45,
+      category: 'sniper',
+      modelStyle: 'svd',
     },
     knife: {
       id: 'knife',
       model: 'Combat Knife',
       name: 'Knife',
       nameZh: '战术匕首',
-      slot: 4,
+      slot: 3,
       melee: true,
       damage: 90,
       backstabDamage: 999,
@@ -171,18 +177,41 @@
     },
   };
 
+  /**
+   * Guns ported from the large-battlefield build. weapon-catalog.js already
+   * authors them on our scale, so they drop straight in — but the original
+   * three stay authoritative if an id ever collides.
+   */
+  if (global.VF.WEAPON_CATALOG) {
+    Object.keys(global.VF.WEAPON_CATALOG).forEach(function (id) {
+      if (WEAPONS[id]) return;
+      WEAPONS[id] = global.VF.WEAPON_CATALOG[id];
+    });
+  }
+
+  const LEGACY_SLOT_GUN = { 1: 'ar', 2: 'sg' };
+
+  /** Gun the arsenal assigned to a hotbar slot. */
+  function slotWeapon(slot) {
+    const E = global.VF.Economy;
+    const id = E && E.weaponForSlot ? E.weaponForSlot(slot) : null;
+    return id && WEAPONS[id] ? id : LEGACY_SLOT_GUN[slot] || 'ar';
+  }
+
   function Weapons(player, world, scene) {
     this.player = player;
     this.world = world;
     this.scene = scene;
     this.raycaster = new THREE.Raycaster();
     this.current = 'ar';
-    this.state = {
-      ar: { mag: WEAPONS.ar.magSize, reserve: WEAPONS.ar.reserve },
-      sg: { mag: WEAPONS.sg.magSize, reserve: WEAPONS.sg.reserve },
-      sr: { mag: WEAPONS.sr.magSize, reserve: WEAPONS.sr.reserve },
-      knife: { mag: 1, reserve: 0 },
-    };
+    this.state = {};
+    const selfState = this;
+    Object.keys(WEAPONS).forEach(function (id) {
+      const d = WEAPONS[id];
+      selfState.state[id] = d.melee
+        ? { mag: 1, reserve: 0 }
+        : { mag: d.magSize, reserve: d.reserve };
+    });
     this.cooldown = 0;
     this.firing = false;
     this.reloading = false;
@@ -257,14 +286,78 @@
     document.addEventListener('keydown', (e) => {
       if (!self.player.locked) return;
       if (global.VF.game && global.VF.game.levelEditing) return;
-      if (e.code === 'Digit1') self.equip('ar');
-      if (e.code === 'Digit2') self.equip('sg');
-      if (e.code === 'Digit3') self.equip('sr');
-      if (e.code === 'Digit4' && global.VF.Melee && global.VF.Melee.available()) {
+      if (e.code === 'Digit1') self.equip(slotWeapon(1));
+      if (e.code === 'Digit2') self.equip(slotWeapon(2));
+      // 精确射手 is a 主武器 pick, so slot 3 is the knife wherever melee exists.
+      if (e.code === 'Digit3' && global.VF.Melee && global.VF.Melee.available()) {
         self.equip('knife');
       }
       if (e.code === 'KeyR') self.reload();
     });
+    document.addEventListener(
+      'wheel',
+      function (e) {
+        if (!self.player.locked) return;
+        if (global.VF.game && global.VF.game.levelEditing) return;
+        if (global.VF.UI && global.VF.UI.isMenuOpen && global.VF.UI.isMenuOpen()) return;
+        if (global.VF.Throwables && global.VF.Throwables.busy && global.VF.Throwables.busy()) return;
+        e.preventDefault();
+        self._cycleLoadout(e.deltaY > 0 ? 1 : -1);
+      },
+      { passive: false }
+    );
+  };
+
+  Weapons.prototype._loadoutOrder = function () {
+    const bar = document.getElementById('hotbar');
+    const out = [];
+    if (!bar) return ['1', '2'];
+    const nodes = bar.querySelectorAll('.slot');
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i];
+      if (el.classList.contains('hidden') || el.classList.contains('locked')) continue;
+      out.push(String(el.dataset.slot));
+    }
+    return out.length ? out : ['1'];
+  };
+
+  Weapons.prototype._cycleLoadout = function (dir) {
+    const order = this._loadoutOrder();
+    if (order.length < 2) return;
+    const active = document.querySelector('#hotbar .slot.active');
+    const cur =
+      (active && active.dataset.slot) ||
+      String((WEAPONS[this.current] && WEAPONS[this.current].slot) || '1');
+    let i = order.indexOf(String(cur));
+    if (i < 0) i = 0;
+    const n = order.length;
+    const next = order[(i + (dir > 0 ? 1 : -1) + n) % n];
+    this._selectLoadoutSlot(next);
+  };
+
+  Weapons.prototype._selectLoadoutSlot = function (slot) {
+    slot = String(slot);
+    if (slot === '1' || slot === '2') {
+      this.equip(this.loadoutWeapon(Number(slot)));
+      return;
+    }
+    if (slot === '3') {
+      this.equip('knife');
+      return;
+    }
+    if (slot === 'throw') {
+      if (global.VF.UI) global.VF.UI.setHotbarSlot('throw');
+      const T = global.VF.Throwables;
+      const n = T && T.remaining ? T.remaining() : 0;
+      if (global.VF.UI && global.VF.UI.updateAmmo) {
+        global.VF.UI.updateAmmo(n, 0, Math.max(1, n), 'throw');
+      }
+      return;
+    }
+    const building = global.VF.game && global.VF.game.building;
+    if (!building || !building.isEnabled || !building.isEnabled()) return;
+    if (slot === '4') building.enterMode('a');
+    if (slot === '5') building.enterMode('b');
   };
 
   /** 枪械模式进行中：武器由进度强制分配，玩家不能自选（文档 4.1 去装备化）。 */
@@ -297,6 +390,11 @@
       }
       return;
     }
+    if (this.current === id && this.mode === 'weapon') {
+      const slot = String(WEAPONS[id].slot);
+      const active = document.querySelector('#hotbar .slot.active');
+      if (active && String(active.dataset.slot) === slot) return;
+    }
     this._equipNow(id);
   };
 
@@ -314,24 +412,53 @@
     this.current = id;
     this.mode = 'weapon';
     this.cooldown = 0.15 / (global.VF.Skills ? global.VF.Skills.getWeaponSpeedMul(this.player) : 1);
-    if (global.VF.Audio) global.VF.Audio.play('ui');
+    if (global.VF.Audio) global.VF.Audio.play('switchWeapon');
     if (global.VF.game && global.VF.game.building) {
       global.VF.game.building.exitMode();
     }
     if (this.player && this.player.setHeldMode) this.player.setHeldMode('weapon');
     if (global.VF.UI) global.VF.UI.setHotbarSlot(WEAPONS[id].slot);
     this._restyleGun(id);
+    if (this.player && this.player.beginWeaponDraw) this.player.beginWeaponDraw();
   };
 
-  /** Ensure current gun is owned; fall back to AR. */
+  /** Gun the arsenal put in a hotbar slot, falling back when it is not owned. */
+  Weapons.prototype.loadoutWeapon = function (slot) {
+    const id = slotWeapon(slot);
+    const E = global.VF.Economy;
+    if (E && E.ownsWeapon && !E.ownsWeapon(id)) return LEGACY_SLOT_GUN[slot] || 'ar';
+    return id;
+  };
+
+  /**
+   * Fresh magazine + reserve for every gun. Ammo lives on this instance, so a
+   * spent loadout from the last match (or the range) would otherwise carry over.
+   */
+  Weapons.prototype.resetAmmo = function () {
+    const ids = Object.keys(WEAPONS);
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const d = WEAPONS[id];
+      if (!d) continue;
+      this.state[id] = d.melee
+        ? { mag: 1, reserve: 0 }
+        : { mag: d.magSize, reserve: d.reserve };
+    }
+    if (this.reloading) this._cancelReload();
+    if (global.VF.UI && global.VF.UI.updateAmmo) {
+      if (this.current === 'knife') global.VF.UI.updateAmmo(null, null);
+      else {
+        const ammo = this.getAmmo();
+        if (ammo) global.VF.UI.updateAmmo(ammo.mag, ammo.reserve);
+      }
+    }
+  };
+
+  /** Match start: deploy with the primary chosen in the arsenal. */
   Weapons.prototype.syncOwnedLoadout = function () {
+    this.resetAmmo();
     // 枪械模式的武器不来自商城，别把进度枪换掉
     if (ggLocksLoadout()) return;
-    if (this.current === 'knife' && !(global.VF.Melee && global.VF.Melee.available())) {
-      this.current = 'ar';
-      this._restyleGun('ar');
-      if (global.VF.UI) global.VF.UI.setHotbarSlot(WEAPONS.ar.slot);
-    }
     const owns =
       global.VF.Economy && global.VF.Economy.ownsWeapon
         ? function (id) {
@@ -340,20 +467,21 @@
         : function () {
             return true;
           };
-    if (!owns(this.current)) {
-      this.current = 'ar';
-      this._restyleGun('ar');
-      if (global.VF.UI) global.VF.UI.setHotbarSlot(WEAPONS.ar.slot);
+    let id = slotWeapon(1);
+    if (!WEAPONS[id] || !owns(id)) id = 'ar';
+    if (this.current !== id) {
+      this.current = id;
+      this._restyleGun(id);
     }
+    if (global.VF.UI) global.VF.UI.setHotbarSlot(WEAPONS[id].slot);
     if (global.VF.UI && global.VF.UI.syncWeaponLocks) global.VF.UI.syncWeaponLocks();
   };
 
   Weapons.prototype._restyleGun = function (id) {
-    const gun = this.player.gunNode;
-    if (gun) {
-      if (id === 'sg') gun.scale.set(1.15, 1.1, 0.85);
-      else if (id === 'sr') gun.scale.set(0.95, 0.95, 1.35);
-      else gun.scale.set(1, 1, 1);
+    // Each gun has its own mesh now, so swap the model rather than rescale one.
+    // The knife viewmodel is owned by Melee.restyle below.
+    if (id !== 'knife' && this.player && this.player.applyWeaponModel) {
+      this.player.applyWeaponModel(id);
     }
     if (global.VF.Melee && global.VF.Melee.restyle) {
       global.VF.Melee.restyle(this.player, id);
@@ -424,6 +552,7 @@
     }
 
     ammo.mag -= 1;
+    if (global.VF.Career && global.VF.Career.noteShot) global.VF.Career.noteShot(this.current);
     this.cooldown = def.fireRate;
     // 死斗 spawn protection ends the moment you shoot
     if (this.player.spawnProtect > 0) this.player.spawnProtect = 0;
@@ -474,6 +603,9 @@
 
     if (global.VF.UI) {
       global.VF.UI.updateAmmo(ammo.mag, ammo.reserve);
+    }
+    if (this._shotHitHostile && global.VF.Career && global.VF.Career.noteHit) {
+      global.VF.Career.noteHit(this.current);
     }
     this._applyShotFeedback(def);
   };
@@ -712,7 +844,10 @@
   Weapons.prototype._fireRays = function (def, origin, baseDir, muzzlePos) {
     origin = origin || this.player.getEyePosition();
     baseDir = baseDir || this.player.getLookDirection();
-    const spread = this.player.aiming ? def.adsSpread : def.spread;
+    const ads = this.player._adsBlend != null ? Math.max(0, Math.min(1, this.player._adsBlend)) : this.player.aiming ? 1 : 0;
+    const hipSpread = def.spread || 0;
+    const adsSpread = def.adsSpread != null ? def.adsSpread : hipSpread;
+    const spread = hipSpread + (adsSpread - hipSpread) * ads;
     if (muzzlePos) {
       this._tmpMuzzle.copy(muzzlePos);
     } else if (this.player.muzzle && this.player.muzzle.getWorldPosition) {

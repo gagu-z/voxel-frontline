@@ -200,9 +200,13 @@
         body: '<p>功能筹备中。</p>',
       };
       if (this.els.sheetTitle) this.els.sheetTitle.textContent = conf.title;
+      if (this.els.sheet) this.els.sheet.classList.toggle('career-open', key === 'profile');
       if (this.els.sheetBody) {
         if (key === 'shop' && global.VF.Economy && global.VF.Economy.renderShopHtml) {
           this.els.sheetBody.innerHTML = global.VF.Economy.renderShopHtml();
+        } else if (key === 'profile' && global.VF.Career && global.VF.Career.renderHtml) {
+          this.els.sheetBody.innerHTML = global.VF.Career.renderHtml('home');
+          global.VF.Career.bind(this.els.sheetBody);
         } else {
           this.els.sheetBody.innerHTML = conf.body;
         }
@@ -221,7 +225,10 @@
     },
 
     _closeSheet() {
-      if (this.els && this.els.sheet) this.els.sheet.classList.add('hidden');
+      if (this.els && this.els.sheet) {
+        this.els.sheet.classList.add('hidden');
+        this.els.sheet.classList.remove('career-open');
+      }
     },
 
     _onAction(action) {
@@ -248,10 +255,10 @@
           if (h.onMaterials) h.onMaterials();
           else if (global.VF.Hub && global.VF.Hub.openCraft) global.VF.Hub.openCraft('material');
           break;
-        case 'weapons':
-          this.hide();
-          if (h.onWeapons) h.onWeapons();
-          else if (global.VF.Hub && global.VF.Hub.openCraft) global.VF.Hub.openCraft('weapon');
+        // The arsenal layers over the lobby, so the lobby stays put behind it.
+        // Buying happens in there too — there is no separate weapon shop now.
+        case 'loadout':
+          if (global.VF.Arsenal) global.VF.Arsenal.show();
           break;
         case 'tower':
           this.hide();

@@ -449,6 +449,7 @@
 
       if (this.ended) {
         if (VF.FfaMarker && VF.FfaMarker.hide) VF.FfaMarker.hide();
+        if (VF.WeaponInspect && VF.WeaponInspect.isActive && VF.WeaponInspect.isActive()) return;
         if (this.phaseLeft > 0) {
           this.phaseLeft = Math.max(0, this.phaseLeft - dt);
           if (VF.GgUi && VF.GgUi.syncResultCountdown) {

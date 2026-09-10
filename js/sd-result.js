@@ -264,14 +264,21 @@
         state.matchTimer = setInterval(tick, 1000);
       };
 
-      // 若本局由引爆终结，先让爆炸表现放完再拉起计分板。
       const boom = /引爆/.test(
         (VF.SdMatch && VF.SdMatch.lastResult && VF.SdMatch.lastResult.reason) || ''
       );
+      const revealAfterInspect = function () {
+        const spent = (VF.WeaponInspect && VF.WeaponInspect.lastDurationMs) || 0;
+        const extra = boom ? Math.max(0, BLAST_HOLD - spent) : 0;
+        clearInterval(state.matchTimer);
+        clearTimeout(state.matchRevealTimer);
+        if (extra > 0) state.matchRevealTimer = setTimeout(reveal, extra);
+        else reveal();
+      };
       clearInterval(state.matchTimer);
       clearTimeout(state.matchRevealTimer);
-      if (boom) state.matchRevealTimer = setTimeout(reveal, BLAST_HOLD);
-      else reveal();
+      if (VF.WeaponInspect && VF.WeaponInspect.play) VF.WeaponInspect.play(revealAfterInspect);
+      else revealAfterInspect();
     },
 
     _renderTeam: function (host, team, mvp) {

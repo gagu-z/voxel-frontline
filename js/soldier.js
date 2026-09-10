@@ -823,7 +823,7 @@
 
   /** FPS arms + full rifle — all meshes stay in front of camera (-Z) */
   /** FPS viewmodel — detailed voxel rifle + articulated hands (ref: lower-right hipfire) */
-  function createViewModel(classId) {
+  function createViewModel(classId, weaponId) {
     classId = classId || 'vanguard';
     const root = new THREE.Group();
     root.name = 'SoldierViewModel';
@@ -867,10 +867,23 @@
     const mid = 0x2e343c;
     const rail = 0x22262c;
 
-    const gun = new THREE.Group();
+    const weaponDef =
+      (weaponId && global.VF.WEAPONS && global.VF.WEAPONS[weaponId]) ||
+      (weaponId && global.VF.WEAPON_CATALOG && global.VF.WEAPON_CATALOG[weaponId]) ||
+      null;
+    const built =
+      weaponDef && global.VF.WeaponViewModels && global.VF.WeaponViewModels.buildGun
+        ? global.VF.WeaponViewModels.buildGun(weaponDef)
+        : null;
+
+    const gun = built ? built.gun : new THREE.Group();
     gun.name = 'ViewGun';
     gun.frustumCulled = false;
+    let muzzle = built ? built.muzzle : null;
+    let flash = built ? built.flash : null;
 
+    // Fallback rifle, used when the id has no catalog entry.
+    if (!built) {
     // ---- Stock (camo voxels) ----
     addCamoVolume(gun, 0.02, 0.02, 0.34, 4, 3, 5, 0.048, camo);
     gun.add(b(0.12, 0.08, 0.1, dark, 0.02, 0.0, 0.18));
@@ -927,6 +940,20 @@
     gun.add(b(0.06, 0.02, 0.1, dark, 0.02, -0.08, 0.02));
     gun.add(b(0.02, 0.08, 0.02, dark, 0.02, -0.12, -0.02));
 
+    muzzle = new THREE.Object3D();
+    muzzle.name = 'Muzzle';
+    // Tip of the muzzle brake (same Y as barrel centerline)
+    muzzle.position.set(0, 0.04, muzZ - 0.055);
+    gun.add(muzzle);
+    flash = new THREE.PointLight(0xffaa44, 0, 8);
+    flash.name = 'MuzzleFlash';
+    muzzle.add(flash);
+
+    // Natural hip angle: slight inward yaw, mild pitch — not extreme corner push
+    gun.position.set(0.05, -0.05, -0.1);
+    gun.rotation.set(0.1, 0.16, 0.05);
+    }
+
     // ========== RIGHT HAND (grip) — palm + fingers ==========
     const rHand = new THREE.Group();
     rHand.name = 'ViewRightHand';
@@ -941,6 +968,10 @@
     rHand.add(b(0.035, 0.035, 0.05, skinDark, 0.09, 0.02, -0.06));
     rHand.position.set(0.1, -0.24, 0.1);
     rHand.rotation.set(0.15, 0.2, -0.15);
+    const vmCat = weaponDef && weaponDef.category;
+    const vmStyle = weaponDef && weaponDef.modelStyle;
+    const vmPistol = vmCat === 'pistol' || (vmStyle && vmStyle.indexOf('pistol') === 0);
+    if (vmPistol) rHand.position.set(0.05, -0.11, 0.06);
     gun.add(rHand);
 
     // ========== LEFT HAND (forend support) ==========
@@ -956,30 +987,30 @@
     lHand.add(b(0.035, 0.035, 0.05, skinDark, -0.09, 0.02, 0.08));
     lHand.position.set(-0.08, -0.1, long ? -0.32 : -0.28);
     lHand.rotation.set(0.2, -0.35, 0.4);
+    // A pistol has no support hand; the others grip at different points along
+    // the handguard, so the left hand follows the gun's length.
+    if (vmPistol) lHand.visible = false;
+    else if (vmCat === 'smg') lHand.position.set(-0.08, -0.1, -0.22);
+    else if (vmCat === 'sniper' || vmCat === 'dmr') lHand.position.set(-0.08, -0.1, -0.36);
+    else if (vmCat === 'lmg') lHand.position.set(-0.08, -0.12, -0.3);
     gun.add(lHand);
 
-    const muzzle = new THREE.Object3D();
-    muzzle.name = 'Muzzle';
-    // Tip of the muzzle brake (same Y as barrel centerline)
-    muzzle.position.set(0, 0.04, muzZ - 0.055);
-    gun.add(muzzle);
-    const flash = new THREE.PointLight(0xffaa44, 0, 8);
-    flash.name = 'MuzzleFlash';
-    muzzle.add(flash);
-
-    // Natural hip angle: slight inward yaw, mild pitch — not extreme corner push
-    gun.position.set(0.05, -0.05, -0.1);
-    gun.rotation.set(0.1, 0.16, 0.05);
     root.add(gun);
 
     // ========== RIGHT ARM (sleeve + forearm → grip) ==========
     const arm = new THREE.Group();
     arm.name = 'ViewRightArm';
     arm.frustumCulled = false;
-    addCheckeredSleeve(arm, 0, 0.06, 0, 0.22, 'y');
-    arm.add(b(0.14, 0.06, 0.14, sleeveA, 0, 0.16, 0));
-    arm.add(b(0.13, 0.16, 0.13, skin, 0.01, -0.12, 0.03));
-    arm.add(b(0.12, 0.08, 0.12, skinDark, 0.01, -0.22, 0.04));
+    const rSleeve = new THREE.Group();
+    rSleeve.name = 'ViewRightSleeve';
+    addCheckeredSleeve(rSleeve, 0, 0.06, 0, 0.22, 'y');
+    rSleeve.add(b(0.14, 0.06, 0.14, sleeveA, 0, 0.16, 0));
+    arm.add(rSleeve);
+    const rFore = new THREE.Group();
+    rFore.name = 'ViewRightForearm';
+    rFore.add(b(0.13, 0.16, 0.13, skin, 0.01, -0.12, 0.03));
+    rFore.add(b(0.12, 0.08, 0.12, skinDark, 0.01, -0.22, 0.04));
+    arm.add(rFore);
     arm.position.set(0.22, -0.1, 0.1);
     arm.rotation.set(0.72, 0.08, -0.42);
     root.add(arm);
@@ -988,16 +1019,25 @@
     const lArm = new THREE.Group();
     lArm.name = 'ViewLeftArm';
     lArm.frustumCulled = false;
-    addCheckeredSleeve(lArm, 0, 0.04, 0, 0.2, 'y');
-    lArm.add(b(0.13, 0.05, 0.13, sleeveB, 0, 0.14, 0));
-    lArm.add(b(0.12, 0.15, 0.12, skin, -0.01, -0.12, 0.04));
-    lArm.add(b(0.11, 0.07, 0.11, skinDark, -0.01, -0.22, 0.05));
+    const lSleeve = new THREE.Group();
+    lSleeve.name = 'ViewLeftSleeve';
+    addCheckeredSleeve(lSleeve, 0, 0.04, 0, 0.2, 'y');
+    lSleeve.add(b(0.13, 0.05, 0.13, sleeveB, 0, 0.14, 0));
+    lArm.add(lSleeve);
+    const lFore = new THREE.Group();
+    lFore.name = 'ViewLeftForearm';
+    lFore.add(b(0.12, 0.15, 0.12, skin, -0.01, -0.12, 0.04));
+    lFore.add(b(0.11, 0.07, 0.11, skinDark, -0.01, -0.22, 0.05));
+    lArm.add(lFore);
     lArm.position.set(-0.14, -0.14, -0.18);
     lArm.rotation.set(0.95, 0.32, 0.48);
+    // A pistol is a one-handed hold, so the support arm has nothing to reach for.
+    if (vmPistol) lArm.visible = false;
+    else if (vmCat === 'smg') lArm.position.set(-0.14, -0.14, -0.12);
     root.add(lArm);
 
     root.userData.classId = classId;
-    return { root, gun, muzzle, flash, rightArm: arm, leftArm: lArm };
+    return { root, gun, muzzle, flash, rightArm: arm, leftArm: lArm, oneHanded: !!vmPistol };
   }
 
   function viewModelSleeveColors(classId) {
@@ -1025,6 +1065,14 @@
     }
     return { skin: skin, skinDark: skinDark, sleeveA: sleeveA, sleeveB: sleeveB };
   }
+
+  /**
+   * Knife arm anchors, in viewmodel space. The shoulder sits low and right of
+   * the eye and behind it, so it stays off-frame through the whole stab and can
+   * serve as the swing pivot; the arm is then built from the fist out to it.
+   */
+  const KNIFE_WRIST_IN_HAND = new THREE.Vector3(0.02, -0.01, 0.1);
+  const KNIFE_SHOULDER = new THREE.Vector3(0.45, -0.51, 0.77);
 
   /**
    * FPS combat knife: right fist on the handle, forearm from lower-right,
@@ -1069,25 +1117,52 @@
     rHand.add(b(0.042, 0.042, 0.07, skin, 0.08, 0.03, -0.01));
     rHand.add(b(0.036, 0.036, 0.05, skinDark, 0.09, 0.03, -0.05));
     blade.position.set(0.01, 0.03, -0.02);
-    blade.rotation.set(-0.12, 0.08, 0.18);
+    // Blade local -Z is the tip. From the lower-right hip, a small positive X
+    // lifts the point toward the crosshair; negative X reads as stabbing the
+    // floor a few metres ahead.
+    blade.rotation.set(0.06, 0.02, 0.1);
     rHand.add(blade);
 
-    // ---- Right forearm from lower-right into the fist ----
+    rHand.position.set(0.12, -0.12, -0.14);
+    rHand.rotation.set(0.42, 0.22, 0.3);
+    rHand.updateMatrix();
+
+    // ---- Right arm: aimed at the fist, not merely parked near it ----
+    // The fist and blade are the hero elements and their placement is tuned
+    // against the crosshair, so the arm is built backwards from the wrist out
+    // to an off-frame shoulder. It has to be a single unbroken limb: a stab
+    // lifts the wrist into view, and any gap here reads as a knife held by a
+    // disembodied hand.
+    const wrist = KNIFE_WRIST_IN_HAND.clone().applyMatrix4(rHand.matrix);
+    const armLen = wrist.distanceTo(KNIFE_SHOULDER);
+
     const arm = new THREE.Group();
     arm.name = 'ViewKnifeArm';
     arm.frustumCulled = false;
-    addCheckeredSleeve(arm, 0, 0.08, 0, 0.22, 'y');
-    arm.add(b(0.14, 0.06, 0.14, sleeveA, 0, 0.18, 0));
-    arm.add(b(0.13, 0.16, 0.13, skin, 0.01, -0.1, 0.03));
-    arm.add(b(0.12, 0.08, 0.12, skinDark, 0.01, -0.2, 0.04));
-    arm.position.set(0.16, -0.16, 0.14);
-    arm.rotation.set(0.62, 0.12, -0.48);
-
-    rHand.position.set(0.12, -0.12, -0.14);
-    rHand.rotation.set(0.18, 0.28, 0.38);
+    // Local y = 0 sits at the wrist and runs +y toward the shoulder. Segments
+    // overlap slightly so the limb never shows a seam.
+    arm.add(b(0.12, 0.1, 0.12, skinDark, 0, 0.03, 0));
+    arm.add(b(0.13, 0.18, 0.13, skin, 0, 0.15, 0));
+    addCheckeredSleeve(arm, 0, 0.4, 0, 0.36, 'y');
+    arm.add(b(0.145, 0.25, 0.145, sleeveA, 0, 0.67, 0));
+    // Upper arm out to the shoulder. Plain boxes, not checkered cells: this
+    // stretch is never on screen, it only has to be there so the limb still
+    // crosses the frame edge at full extension.
+    arm.add(b(0.15, armLen - 0.78, 0.15, sleeveB, 0, (armLen + 0.78) * 0.5, 0));
+    arm.position.copy(wrist);
+    arm.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      KNIFE_SHOULDER.clone().sub(wrist).normalize()
+    );
 
     slash.add(arm);
     slash.add(rHand);
+
+    // Swing around the shoulder. Rotation then pivots the whole limb the way a
+    // real arm does, instead of sliding it bodily across the view.
+    slash.position.copy(KNIFE_SHOULDER);
+    arm.position.sub(KNIFE_SHOULDER);
+    rHand.position.sub(KNIFE_SHOULDER);
 
     // ---- Left fist, ready / guard (no blade) ----
     const lArm = new THREE.Group();
@@ -1120,6 +1195,19 @@
   }
 
   /**
+   * Throwable arm anchors, in viewmodel space. Both shoulders sit below and
+   * behind the eye, so a throw is a rotation about a joint that never moves and
+   * the upper arm always leaves frame through the bottom edge. An arm pivoted
+   * at the wrist instead drags its own shoulder into the middle of the lens.
+   * The wrists are the 平举 cook: left palm level and forward, right cocked
+   * beside it with the nade in view.
+   */
+  const THROW_SHOULDER_R = { x: 0.4, y: -0.38, z: 0.2 };
+  const THROW_SHOULDER_L = { x: -0.34, y: -0.38, z: 0.2 };
+  const THROW_WRIST_R = { x: 0.2, y: -0.2, z: -0.56 };
+  const THROW_WRIST_L = { x: -0.19, y: -0.18, z: -0.62 };
+
+  /**
    * FPS lethal/tactical: camera-space viewmodel in the lower-right, same
    * occupancy as the rifle. Throwables.js animates the root through
    * draw / cook / throw — the nade must stay on-screen while charging.
@@ -1136,7 +1224,7 @@
     const root = new THREE.Group();
     root.name = 'ViewThrowable';
     root.frustumCulled = false;
-    root.position.set(0.2, -0.22, -0.44);
+    root.position.set(0, 0, 0);
 
     const rig = new THREE.Group();
     rig.name = 'ViewThrowRig';
@@ -1146,87 +1234,97 @@
     item.name = 'ViewThrowItem';
     item.frustumCulled = false;
 
-    const grenade = new THREE.Group();
-    grenade.name = 'ViewThrowGrenade';
-    const body = b(0.17, 0.22, 0.17, 0x4a5a3a, 0, 0, 0);
-    body.name = 'ViewThrowBody';
-    body.material = new THREE.MeshLambertMaterial({
-      color: 0x4a5a3a,
-      emissive: 0x1a2014,
-      emissiveIntensity: 0.22,
-    });
-    grenade.add(body);
-    grenade.add(b(0.12, 0.05, 0.12, 0x2a2a2a, 0, 0.12, 0));
-    grenade.add(b(0.045, 0.09, 0.045, 0x3a3a3a, 0.08, 0.1, 0.02));
-    grenade.add(b(0.035, 0.12, 0.025, 0xc8c070, 0.1, 0.02, 0.04));
-    item.add(grenade);
-
-    const bottle = new THREE.Group();
-    bottle.name = 'ViewThrowBottle';
-    bottle.visible = false;
-    bottle.add(b(0.1, 0.26, 0.1, 0xcc6622, 0, -0.02, 0));
-    bottle.add(b(0.06, 0.1, 0.06, 0x8a4420, 0, 0.14, 0));
-    bottle.add(b(0.08, 0.04, 0.08, 0xe8d8a8, 0, 0.2, 0));
-    item.add(bottle);
-
-    const can = new THREE.Group();
-    can.name = 'ViewThrowCan';
-    can.visible = false;
-    can.add(b(0.12, 0.2, 0.12, 0xe8e0c8, 0, 0, 0));
-    can.add(b(0.1, 0.04, 0.1, 0x888888, 0, 0.11, 0));
-    item.add(can);
-
-    function uniquifyMats(obj) {
-      obj.traverse(function (m) {
-        if (m.material) m.material = m.material.clone();
-      });
-    }
-    uniquifyMats(bottle);
-    uniquifyMats(can);
+    // Left empty on purpose: throwables.js drops the world model for whatever
+    // kind is equipped in here, so the hold, the thrown object and the loadout
+    // preview are all the same geometry.
+    const holder = new THREE.Group();
+    holder.name = 'ViewThrowHolder';
+    holder.frustumCulled = false;
+    item.add(holder);
 
     const rHand = new THREE.Group();
+    rHand.name = 'ViewThrowRightHand';
     rHand.frustumCulled = false;
-    rHand.add(b(0.16, 0.12, 0.15, skin, 0.03, -0.02, 0.02));
-    rHand.add(b(0.14, 0.1, 0.13, skinDark, 0.03, -0.04, 0.04));
-    rHand.add(b(0.045, 0.11, 0.05, skin, -0.04, -0.11, 0.02));
-    rHand.add(b(0.045, 0.12, 0.05, skin, 0.01, -0.12, 0.02));
-    rHand.add(b(0.045, 0.12, 0.05, skin, 0.06, -0.12, 0.02));
-    rHand.add(b(0.045, 0.1, 0.05, skin, 0.11, -0.1, 0.02));
-    rHand.add(b(0.055, 0.05, 0.09, skin, 0.12, 0.04, -0.04));
-    item.position.set(0.04, 0.02, -0.14);
+    // FPS looks down at this fist, so a wrap under the nade is hidden by the
+    // palm and reads as a tray. C-clamp on the nade's equator: thumb inner,
+    // finger posts around the far face, small heel on the outer side.
+    rHand.add(b(0.05, 0.058, 0.052, skin, 0.072, 0.0, 0.018));
+    rHand.add(b(0.042, 0.046, 0.044, skinDark, 0.074, -0.02, 0.028));
+    rHand.add(b(0.022, 0.055, 0.04, skin, -0.04, 0.012, -0.058));
+    rHand.add(b(0.022, 0.06, 0.042, skin, -0.004, 0.016, -0.066));
+    rHand.add(b(0.022, 0.06, 0.042, skin, 0.032, 0.014, -0.066));
+    rHand.add(b(0.02, 0.05, 0.038, skin, 0.064, 0.006, -0.048));
+    rHand.add(b(0.038, 0.04, 0.05, skin, -0.058, 0.022, 0.006));
+    rHand.add(b(0.032, 0.034, 0.04, skinDark, -0.052, 0.04, -0.028));
+    item.scale.setScalar(0.55);
+    item.position.set(0.0, 0.04, -0.02);
+    item.rotation.set(0, -0.9, 0);
     rHand.add(item);
-    rHand.position.set(0.06, -0.1, -0.1);
-    rHand.rotation.set(0.18, 0.22, 0.12);
+
+    // Open spotting palm: fingers along local -Z so a 平举 reads as aiming,
+    // not a second fist parked at the bottom of the frame.
+    const lHand = new THREE.Group();
+    lHand.name = 'ViewThrowLeftHand';
+    lHand.frustumCulled = false;
+    lHand.add(b(0.14, 0.04, 0.11, skin, 0, 0, 0.01));
+    lHand.add(b(0.13, 0.03, 0.09, skinDark, 0, -0.02, 0.02));
+    lHand.add(b(0.028, 0.024, 0.12, skin, -0.05, 0.005, -0.1));
+    lHand.add(b(0.028, 0.024, 0.13, skin, -0.016, 0.006, -0.105));
+    lHand.add(b(0.028, 0.024, 0.12, skin, 0.018, 0.006, -0.1));
+    lHand.add(b(0.026, 0.022, 0.1, skin, 0.05, 0.004, -0.09));
+    lHand.add(b(0.04, 0.03, 0.07, skin, -0.09, 0.01, 0.02));
+
+    /**
+     * Limb hanging from a shoulder at the local origin down its own -Y to the
+     * wrist. Only the last third is ever on screen, so the upper arm is plain
+     * boxes and the checkered sleeve sits where the frame edge cuts across it.
+     */
+    function buildLimb(arm, len, w, sleeve) {
+      arm.add(b(w + 0.03, 0.13, w + 0.03, sleeve, 0, -0.06, 0));
+      arm.add(b(w, len * 0.42, w, sleeve, 0, -len * 0.3, 0));
+      addCheckeredSleeve(arm, 0, -len * 0.63, 0, len * 0.22, 'y');
+      // The forearm tapers into a glove cuff. Left flush and full width it is
+      // the same colour and wider than the fist, and the two merge into one
+      // featureless slab with no wrist anywhere in it.
+      arm.add(b(w - 0.03, len * 0.14, w - 0.03, skin, 0, -len * 0.82, 0));
+      arm.add(b(w - 0.05, len * 0.08, w - 0.05, skinDark, 0, -len * 0.91, 0));
+      arm.add(b(w - 0.02, 0.055, w - 0.02, sleeve, 0, -len * 0.955, 0));
+    }
+
+    /** Anchor the shoulder and point -Y at the wrist; returns the limb length. */
+    function aimLimb(arm, sh, wr) {
+      const dir = new THREE.Vector3(wr.x - sh.x, wr.y - sh.y, wr.z - sh.z);
+      const len = dir.length();
+      arm.position.set(sh.x, sh.y, sh.z);
+      arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.divideScalar(len));
+      return len;
+    }
+
+    /**
+     * Pose a hand in viewmodel space and divide the arm's aim back out of it,
+     * so a level palm stays level however the shoulder happens to be pointed.
+     */
+    function setHandAim(hand, arm, rx, ry, rz) {
+      const want = new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz));
+      hand.quaternion.copy(arm.quaternion).invert().multiply(want);
+    }
 
     const rArm = new THREE.Group();
+    rArm.name = 'ViewThrowRightArm';
     rArm.frustumCulled = false;
-    addCheckeredSleeve(rArm, 0, 0.1, 0, 0.24, 'y');
-    rArm.add(b(0.17, 0.07, 0.17, sleeveA, 0, 0.22, 0));
-    rArm.add(b(0.15, 0.2, 0.15, skin, 0.01, -0.08, 0.03));
-    rArm.add(b(0.14, 0.1, 0.14, skinDark, 0.01, -0.22, 0.04));
-    rArm.position.set(0.1, -0.08, 0.08);
-    rArm.rotation.set(0.48, 0.08, -0.32);
+    const rLen = aimLimb(rArm, THROW_SHOULDER_R, THROW_WRIST_R);
+    buildLimb(rArm, rLen, 0.16, sleeveA);
+    rHand.position.set(0, -rLen, 0);
+    setHandAim(rHand, rArm, 0.16, 0.1, 0.08);
     rArm.add(rHand);
 
-    const lHand = new THREE.Group();
-    lHand.frustumCulled = false;
-    lHand.add(b(0.13, 0.1, 0.13, skin, 0, 0, 0));
-    lHand.add(b(0.12, 0.08, 0.11, skinDark, 0, -0.02, 0.02));
-    lHand.add(b(0.038, 0.09, 0.042, skin, -0.055, -0.09, 0));
-    lHand.add(b(0.038, 0.1, 0.042, skin, -0.015, -0.1, 0));
-    lHand.add(b(0.038, 0.09, 0.042, skin, 0.025, -0.09, 0));
-    lHand.add(b(0.045, 0.045, 0.07, skin, -0.08, 0.03, 0.03));
-    lHand.position.set(-0.08, -0.04, -0.18);
-    lHand.rotation.set(0.32, -0.18, 0.38);
-
     const lArm = new THREE.Group();
+    lArm.name = 'ViewThrowLeftArm';
     lArm.frustumCulled = false;
-    addCheckeredSleeve(lArm, 0, 0.06, 0, 0.2, 'y');
-    lArm.add(b(0.15, 0.06, 0.15, sleeveB, 0, 0.16, 0));
-    lArm.add(b(0.13, 0.16, 0.13, skin, -0.01, -0.1, 0.04));
-    lArm.add(b(0.12, 0.09, 0.12, skinDark, -0.01, -0.22, 0.05));
-    lArm.position.set(-0.12, -0.14, 0.02);
-    lArm.rotation.set(0.78, 0.22, 0.38);
+    const lLen = aimLimb(lArm, THROW_SHOULDER_L, THROW_WRIST_L);
+    buildLimb(lArm, lLen, 0.15, sleeveB);
+    lHand.position.set(0, -lLen, 0);
+    setHandAim(lHand, lArm, 0.02, -0.2, 3.0);
     lArm.add(lHand);
 
     rig.add(rArm);
@@ -1236,10 +1334,11 @@
     root.userData.arm = rig;
     root.userData.rArm = rArm;
     root.userData.lArm = lArm;
+    root.userData.rHand = rHand;
+    root.userData.lHand = lHand;
     root.userData.item = item;
-    root.userData.body = body;
-    root.userData.parts = { grenade: grenade, bottle: bottle, can: can };
-    root.userData.hip = { x: 0.2, y: -0.22, z: -0.44, rx: 0, ry: 0, rz: 0 };
+    root.userData.parts = { holder: holder };
+    root.userData.hip = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
     root.userData.rArmRest = {
       x: rArm.position.x,
       y: rArm.position.y,
@@ -1255,6 +1354,22 @@
       rx: lArm.rotation.x,
       ry: lArm.rotation.y,
       rz: lArm.rotation.z,
+    };
+    root.userData.rHandRest = {
+      x: rHand.position.x,
+      y: rHand.position.y,
+      z: rHand.position.z,
+      rx: rHand.rotation.x,
+      ry: rHand.rotation.y,
+      rz: rHand.rotation.z,
+    };
+    root.userData.lHandRest = {
+      x: lHand.position.x,
+      y: lHand.position.y,
+      z: lHand.position.z,
+      rx: lHand.rotation.x,
+      ry: lHand.rotation.y,
+      rz: lHand.rotation.z,
     };
     root.userData.rest = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
     return root;

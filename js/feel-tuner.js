@@ -61,6 +61,9 @@
         { key: 'poseRoll', label: '枪口横滚倍率', min: 0, max: 0.5, step: 0.01 },
         { key: 'poseY', label: '枪身上抬', min: 0, max: 0.2, step: 0.005 },
         { key: 'poseZ', label: '枪身后坐', min: 0, max: 0.2, step: 0.005 },
+        { key: 'equipRate', label: '切枪抬起速度', min: 1, max: 8, step: 0.1 },
+        { key: 'equipDip', label: '切枪下沉', min: 0, max: 0.6, step: 0.01 },
+        { key: 'equipPitch', label: '切枪俯角', min: 0, max: 1.5, step: 0.05 },
       ],
     },
     {
@@ -124,6 +127,12 @@
       fields: [
         { key: 'hipFov', label: '腰射 FOV', min: 50, max: 100, step: 1 },
         { key: 'adsFov', label: '默认 ADS FOV', min: 20, max: 70, step: 1 },
+        { key: 'adsFovIn', label: '开镜 FOV 速率', min: 4, max: 28, step: 0.5 },
+        { key: 'adsFovOut', label: '关镜 FOV 速率', min: 3, max: 20, step: 0.5 },
+        { key: 'adsBlendIn', label: '开镜枪模速率', min: 4, max: 24, step: 0.5 },
+        { key: 'adsBlendOut', label: '关镜枪模速率', min: 3, max: 20, step: 0.5 },
+        { key: 'camRoll', label: '平移滚转', min: 0, max: 0.08, step: 0.002 },
+        { key: 'stairSmooth', label: '楼梯镜头平滑', min: 8, max: 32, step: 0.5 },
         { key: 'mouseSens', label: '鼠标灵敏度', min: 0.0005, max: 0.008, step: 0.0001 },
         { key: 'adsSens', label: 'ADS 灵敏度', min: 0.0003, max: 0.004, step: 0.0001 },
       ],
@@ -157,6 +166,8 @@
         { key: 'sprintMul', label: '冲刺倍率', min: 1, max: 2.5, step: 0.01 },
         { key: 'crouchMul', label: '蹲走倍率', min: 0.2, max: 1, step: 0.01 },
         { key: 'adsMul', label: 'ADS 移速倍率', min: 0.2, max: 1, step: 0.01 },
+        { key: 'slideMul', label: '滑铲倍率', min: 0.8, max: 2, step: 0.01 },
+        { key: 'slideDur', label: '滑铲时长(秒)', min: 0.2, max: 1, step: 0.01 },
       ],
     },
     {

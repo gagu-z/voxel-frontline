@@ -1813,7 +1813,6 @@
     _showMatchEnd(winnerTeam, reason) {
       const game = global.VF.game;
       if (game) game.running = false;
-      document.exitPointerLock && document.exitPointerLock();
 
       if (game && game.bases) {
         const myTeam =

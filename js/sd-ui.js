@@ -147,8 +147,9 @@
       this._setBuildSlots(true);
     },
 
-    _setBuildSlots: function (visible) {
-      if (VF.UI && VF.UI.setArenaKnifeSlot) VF.UI.setArenaKnifeSlot(!visible);
+    _setBuildSlots: function () {
+      if (VF.UI && VF.UI.syncHotbarLayout) VF.UI.syncHotbarLayout();
+      if (VF.UI && VF.UI.syncBuildHud) VF.UI.syncBuildHud();
     },
 
     /* ──────────────────────── per-frame sync ──────────────────────── */

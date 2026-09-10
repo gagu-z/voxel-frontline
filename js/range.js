@@ -312,17 +312,19 @@
   Range.prototype._refillAmmo = function () {
     const w = this._weapons();
     if (!w || !w.state) return;
-    const ids = ['ar', 'sg', 'sr'];
+    const defs = global.VF.WEAPONS || {};
+    const ids = Object.keys(defs);
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
-      const def = global.VF.WEAPONS && global.VF.WEAPONS[id];
-      if (!w.state[id] || !def) continue;
+      const def = defs[id];
+      if (!def || def.melee) continue;
+      if (!w.state[id]) w.state[id] = { mag: 0, reserve: 0 };
       w.state[id].mag = def.magSize;
       w.state[id].reserve = 999;
     }
     if (global.VF.UI && w.getAmmo) {
       const a = w.getAmmo();
-      global.VF.UI.updateAmmo(a.mag, a.reserve);
+      if (a) global.VF.UI.updateAmmo(a.mag, a.reserve);
     }
   };
 
@@ -450,6 +452,12 @@
     player.health = player.maxHealth || 100;
     player.aiming = false;
     player._adsBlend = 0;
+    player._adsFov = player.camera && player.camera.fov != null ? player.camera.fov : 70;
+    if (player._lookSwayPos) player._lookSwayPos.set(0, 0, 0);
+    if (player._lookSwayRot) player._lookSwayRot.set(0, 0, 0);
+    player._lookDx = 0;
+    player._lookDy = 0;
+    player._camRoll = 0;
     player.velocity.set(0, 0, 0);
 
     const spawn = this.world.getSpawnPosition();
@@ -459,7 +467,8 @@
     player.pitch = 0;
     player.onGround = true;
 
-    weapons.equip('ar');
+    // Bring in the arsenal's primary so the range can be used to try out a buy.
+    weapons.equip(weapons.loadoutWeapon ? weapons.loadoutWeapon(1) : 'ar');
     this._refillAmmo();
 
     this._score = 0;

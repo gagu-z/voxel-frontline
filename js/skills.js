@@ -1248,8 +1248,10 @@
       sparkAcc: 0,
     };
     this.dashCooldown = DASH.cooldown;
+    if (this.player.slide && this.player._endSlide) this.player._endSlide(false);
     if (this.player.crouching && this.player._canStand && this.player._canStand()) {
       this.player.crouching = false;
+      this.player._crouchToggle = false;
     }
     this.player.velocity.set(0, 0, 0);
     if (global.VF.Audio) global.VF.Audio.play('dash');
@@ -1837,27 +1839,39 @@
     this._syncHud();
   };
 
-  Skills.prototype._makeC4Mesh = function () {
+  function makeC4Mesh(opts) {
+    opts = opts || {};
+    const s = opts.scale != null ? opts.scale : 1;
+    const view = !!opts.viewmodel;
     const g = new THREE.Group();
+    g.name = 'C4Mesh';
+    g.frustumCulled = !view;
     const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.42, 0.22, 0.32),
+      new THREE.BoxGeometry(0.42 * s, 0.22 * s, 0.32 * s),
       new THREE.MeshLambertMaterial({ color: 0x2a2e24 })
     );
+    body.frustumCulled = !view;
     g.add(body);
     const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.44, 0.06, 0.34),
+      new THREE.BoxGeometry(0.44 * s, 0.06 * s, 0.34 * s),
       new THREE.MeshLambertMaterial({ color: 0xc07028, emissive: 0x401800, emissiveIntensity: 0.35 })
     );
-    stripe.position.y = 0.02;
+    stripe.position.y = 0.02 * s;
+    stripe.frustumCulled = !view;
     g.add(stripe);
     const led = new THREE.Mesh(
-      new THREE.BoxGeometry(0.06, 0.06, 0.06),
+      new THREE.BoxGeometry(0.06 * s, 0.06 * s, 0.06 * s),
       new THREE.MeshBasicMaterial({ color: 0xff2200 })
     );
-    led.position.set(0.14, 0.14, 0.1);
+    led.position.set(0.14 * s, 0.14 * s, 0.1 * s);
+    led.frustumCulled = !view;
     g.add(led);
     g.userData.led = led;
     return g;
+  }
+
+  Skills.prototype._makeC4Mesh = function () {
+    return makeC4Mesh();
   };
 
   Skills.prototype._stickPending = function (stick) {
@@ -2497,7 +2511,10 @@
         const p = u.mesh.position;
         const dx = p.x - d.x;
         const dz = p.z - d.z;
-        if (dx * dx + dz * dz <= r2) this._healTarget(u, heal);
+        if (dx * dx + dz * dz <= r2) {
+          this._healTarget(u, heal);
+          if (global.VF.Career && global.VF.Career.noteHeal) global.VF.Career.noteHeal(heal);
+        }
       }
     }
 
@@ -3079,6 +3096,9 @@
   Skills.ENGINEER = ENGINEER;
   Skills.DASH = DASH;
 
+  Skills.makeC4Mesh = makeC4Mesh;
+
   global.VF = global.VF || {};
   global.VF.Skills = Skills;
+  global.VF.makeC4Mesh = makeC4Mesh;
 })(typeof window !== 'undefined' ? window : this);

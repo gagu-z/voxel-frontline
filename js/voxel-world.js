@@ -107,6 +107,10 @@
     this.ziplines = [];
     /** Voxel cells placed as climbable stairs — auto step-up only on these */
     this.stairVoxels = new Set();
+    this.stairColumns = new Set();
+    this.stairColY = new Map();
+    this.stairColTreads = new Map();
+    this._stairColList = [];
     this.mapSeed = 0; // 0 = preview/default; match seed set via regenerate()
     this._noiseSeed = 0; // layered into _noise during building phase
     this._dirtyChunks = new Set();
@@ -204,19 +208,75 @@
     return (x | 0) + ',' + (y | 0) + ',' + (z | 0);
   };
 
+  VoxelWorld.prototype._clearStairIndex = function () {
+    if (this.stairVoxels) this.stairVoxels.clear();
+    else this.stairVoxels = new Set();
+    if (this.stairColumns) this.stairColumns.clear();
+    else this.stairColumns = new Set();
+    if (this.stairColY) this.stairColY.clear();
+    else this.stairColY = new Map();
+    if (this.stairColTreads) this.stairColTreads.clear();
+    else this.stairColTreads = new Map();
+    this._stairColList = [];
+  };
+
+  VoxelWorld.prototype._stairColKey = function (x, z) {
+    return (x | 0) + ',' + (z | 0);
+  };
+
   /** Mark a solid voxel as a stair tread (walk-up without jump) */
   VoxelWorld.prototype.markStair = function (x, y, z) {
+    x = x | 0;
+    y = y | 0;
+    z = z | 0;
     if (!this.stairVoxels) this.stairVoxels = new Set();
     this.stairVoxels.add(this._stairKey(x, y, z));
+    if (!this.stairColumns) this.stairColumns = new Set();
+    if (!this.stairColY) this.stairColY = new Map();
+    if (!this.stairColTreads) this.stairColTreads = new Map();
+    if (!this._stairColList) this._stairColList = [];
+    const ck = this._stairColKey(x, z);
+    let treads = this.stairColTreads.get(ck);
+    if (!treads) {
+      treads = [];
+      this.stairColTreads.set(ck, treads);
+    }
+    if (treads.indexOf(y) < 0) treads.push(y);
+    const prev = this.stairColY.get(ck);
+    if (!this.stairColumns.has(ck)) {
+      this.stairColumns.add(ck);
+      this._stairColList.push({ x: x, z: z, y: y });
+    } else if (prev == null || y > prev) {
+      const list = this._stairColList;
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].x === x && list[i].z === z) {
+          list[i].y = y;
+          break;
+        }
+      }
+    }
+    if (prev == null || y > prev) this.stairColY.set(ck, y);
   };
 
   VoxelWorld.prototype.clearStair = function (x, y, z) {
-    if (!this.stairVoxels) return;
-    this.stairVoxels.delete(this._stairKey(x, y, z));
+    if (this.stairVoxels) this.stairVoxels.delete(this._stairKey(x, y, z));
   };
 
   VoxelWorld.prototype.isStairVoxel = function (x, y, z) {
     return !!(this.stairVoxels && this.stairVoxels.has(this._stairKey(x, y, z)));
+  };
+
+  VoxelWorld.prototype.isStairColumn = function (x, z) {
+    return !!(this.stairColumns && this.stairColumns.has(this._stairColKey(x, z)));
+  };
+
+  /** All marked tread Y values in a column (stacked switchbacks keep every flight). */
+  VoxelWorld.prototype.stairTreadYs = function (x, z) {
+    const ck = this._stairColKey(x, z);
+    const arr = this.stairColTreads && this.stairColTreads.get(ck);
+    if (arr && arr.length) return arr;
+    const ty = this.stairColY && this.stairColY.get(ck);
+    return ty != null ? [ty] : [];
   };
 
   VoxelWorld.prototype.fill = function (x0, y0, z0, x1, y1, z1, type, onlyAir) {
@@ -285,8 +345,7 @@
     this.rooftops = [];
     this.buildings = [];
     this.skyBridges = [];
-    if (this.stairVoxels) this.stairVoxels.clear();
-    else this.stairVoxels = new Set();
+    this._clearStairIndex();
 
     while (this.props && this.props.length) {
       this.destroyProp(this.props[0]);
@@ -302,6 +361,9 @@
       }
     }
     this.ziplines = [];
+    this._pveDistrict = false;
+    this._ffaDistrict = false;
+    this._districtSpawns = null;
 
     // Remove non-chunk meshes (zipline posts, leftover props)
     const chunkSet = new Set();
@@ -418,6 +480,9 @@
     const size = this.worldSize;
     this._rngState = (this.mapSeed || 1) >>> 0;
     this._tdmArena = false; // restore the fixed river when leaving 死斗
+    this._ffaDistrict = false;
+    this._pveDistrict = false;
+    this._districtSpawns = null;
 
     // Planned bases — diagonal ends (fixed). No procedural city/buildings.
     this._plannedBases = [
@@ -538,6 +603,9 @@
     this._rngState = (this.mapSeed || 1) >>> 0;
     this._noiseSeed = 0;
     this._tdmArena = true; // 平坦地面, 无固定河道 / 领地栅栏
+    this._pveDistrict = false;
+    this._ffaDistrict = false;
+    this._districtSpawns = null;
 
     // 复用死斗城市管线 (路网 + 街区 + 地标 + 天桥 + 碎石), 出生点换成 8 人环形。
     // 街区比死斗更密, 中立航点周围保留掩体, 再撒一层低矮多向掩体 —— 高频交火、
@@ -570,6 +638,127 @@
 
     if (global.VF.refreshWorldOutskirts) {
       global.VF.refreshWorldOutskirts(this);
+    }
+  };
+
+  /**
+   * Personal 自由混战 only: Doodle District voxel layout (not 枪械模式 / PVP FFA).
+   */
+  VoxelWorld.prototype.generateFfaDistrictMap = function (seed) {
+    this._arenaMargin = FFA_ARENA_MARGIN;
+    this._resetForGenerate(seed);
+    this._generateFfaDistrict();
+    this._finalizeTerrainHeight();
+    this._rebuildAllChunks({ progressive: true, syncRadius: 6 });
+    return this.mapSeed;
+  };
+
+  VoxelWorld.prototype._generateFfaDistrict = function () {
+    this._rngState = (this.mapSeed || 1) >>> 0;
+    this._noiseSeed = 0;
+    this._tdmArena = true;
+    this._ffaDistrict = true;
+    this._pveDistrict = false;
+    this._plannedBases = [];
+    this._plannedLandmarks = [];
+    this._tdmHotzones = [];
+
+    this._buildTerrain();
+    if (this._buildPveDistrict) this._buildPveDistrict();
+    this._tdmSpawnZones = this._planDistrictFfaSpawnZones();
+    this._tdmHotzones = this._planTdmHotzones();
+    this._clearDistrictFfaPads();
+    this._buildBedrockShell();
+
+    if (global.VF.refreshWorldOutskirts) {
+      global.VF.refreshWorldOutskirts(this);
+    }
+  };
+
+  /** FFA homes + neutrals from the district spawn pads (rooftops keep their floor Y). */
+  VoxelWorld.prototype._planDistrictFfaSpawnZones = function () {
+    const size = this.worldSize;
+    const s = this._dS || 1.45;
+    const ox = this._dOx != null ? this._dOx : size * 0.5;
+    const oz = this._dOz != null ? this._dOz : size * 0.5;
+    const half = Math.ceil(55 * s) + 6;
+    this._tdmArenaBounds = {
+      x0: ox - half,
+      x1: ox + half,
+      z0: oz - half,
+      z1: oz + half,
+    };
+    this._tdmArenaCenter = { x: ox, z: oz };
+    this._tdmArenaRadius = half * 0.92;
+
+    const zones = [];
+    let n = 0;
+    const map = (dx, dy, dz) => {
+      if (this._dMapSpawn) return this._dMapSpawn(dx, dy, dz);
+      return {
+        x: Math.round(ox + dx * s),
+        y: (this._dGy || 9) + Math.round(dy),
+        z: Math.round(oz + dz * s),
+      };
+    };
+    const push = (dx, dy, dz, team, home) => {
+      const p = map(dx, dy, dz);
+      zones.push({
+        id: 'ffa-' + n++,
+        x: p.x,
+        z: p.z,
+        y: 0,
+        floorY: p.y,
+        team: team || null,
+        home: !!home,
+      });
+    };
+
+    // 8 homes: player on west street, AI around the rest of the district
+    push(-40, 0, 18, 'ally', true);
+    push(40, 0, 8, 'enemy', true);
+    push(-52, 0, 30, 'enemy', true);
+    push(52, 0, 30, 'enemy', true);
+    push(-48, 7, -30, 'enemy', true);
+    push(48, 7, -30, 'enemy', true);
+    push(-30, 7, -48, 'enemy', true);
+    push(16, 7, -45, 'enemy', true);
+
+    const extras = [
+      [0, 0, 0],
+      [0, 8, 0],
+      [0, 16, -3],
+      [-34, 12, 12],
+      [34, 12, 18],
+      [0, 7, -30],
+      [0, 0, 42],
+    ];
+    for (let i = 0; i < extras.length; i++) {
+      const e = extras[i];
+      push(e[0], e[1], e[2], null, false);
+    }
+    return zones;
+  };
+
+  /** Small headroom only — do not flatten a 7m disk through buildings. */
+  VoxelWorld.prototype._clearDistrictFfaPads = function () {
+    const zones = this._tdmSpawnZones;
+    if (!zones) return;
+    const size = this.worldSize;
+    for (let i = 0; i < zones.length; i++) {
+      const s = zones[i];
+      const gy = s.floorY != null ? s.floorY : this._surface(s.x, s.z) || 9;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const x = s.x + dx;
+          const z = s.z + dz;
+          if (x < 1 || z < 1 || x >= size - 1 || z >= size - 1) continue;
+          for (let y = gy + 1; y <= gy + 4 && y < this.height; y++) {
+            this.set(x, y, z, BLOCK.AIR);
+          }
+        }
+      }
+      s.y = gy + 1;
     }
   };
 
@@ -1721,6 +1910,9 @@
     this._rngState = (this.mapSeed || 1) >>> 0;
     this._noiseSeed = 0;
     this._tdmArena = true; // no fixed river / territory fence on this map
+    this._pveDistrict = false;
+    this._ffaDistrict = false;
+    this._districtSpawns = null;
 
     // No bases in 死斗 — the keep-clear reservations they own do not apply
     this._plannedBases = [];
@@ -4927,8 +5119,10 @@
     this.skyBridges = [];
     this._plannedLandmarks = [];
     this._tdmHotzones = [];
-    if (this.stairVoxels) this.stairVoxels.clear();
-    else this.stairVoxels = new Set();
+    this._pveDistrict = false;
+    this._ffaDistrict = false;
+    this._districtSpawns = null;
+    this._clearStairIndex();
     while (this.props && this.props.length) {
       this.destroyProp(this.props[0]);
     }

@@ -109,6 +109,83 @@
     },
   };
 
+  /**
+   * Guns ported from the large-battlefield build, priced by tier. Names and
+   * calibers are read from VF.WEAPON_CATALOG so the shop can't drift from the
+   * actual stats — weapon-catalog.js must load before this file.
+   */
+  const PORTED_PRICES = {
+    usp: 150,
+    mp7: 300,
+    ak74: 300,
+    mp5: 320,
+    m4a1: 350,
+    acr: 450,
+    p90: 480,
+    hk419: 500,
+    scarh: 550,
+    m249: 600,
+    mk14ebr: 650,
+    m200: 900,
+  };
+
+  /**
+   * Throwables, priced by how much they swing a fight. The frag is issued free
+   * so there is always something in the slot. Names and stats are read from
+   * VF.THROWABLE_CATALOG — throwables.js must load before this file.
+   */
+  /** Loadout key for the Q throwable. Hotbar 4 in game is the fixed knife. */
+  const THROW_SLOT = 4;
+
+  const THROWABLE_PRICES = {
+    frag: 0,
+    smoke: 90,
+    flash: 130,
+    stun: 160,
+    molotov: 210,
+    semtex: 240,
+  };
+
+  (function registerThrowables() {
+    const cat = global.VF && global.VF.THROWABLE_CATALOG;
+    if (!cat) return;
+    Object.keys(THROWABLE_PRICES).forEach(function (id) {
+      const def = cat[id];
+      if (!def) return;
+      CATALOG[id] = {
+        id: id,
+        kind: 'throwable',
+        name: def.nameZh || def.name,
+        price: THROWABLE_PRICES[id],
+        free: THROWABLE_PRICES[id] <= 0,
+        throwableId: id,
+        desc:
+          '永久解锁 · ' +
+          (def.kind === 'lethal' ? '致命' : '战术') +
+          ' · 半径 ' +
+          def.radius +
+          'm · 热键 Q',
+      };
+    });
+  })();
+
+  (function registerPortedGuns() {
+    const cat = global.VF && global.VF.WEAPON_CATALOG;
+    if (!cat) return;
+    Object.keys(PORTED_PRICES).forEach(function (id) {
+      const def = cat[id];
+      if (!def) return;
+      CATALOG[id] = {
+        id: id,
+        kind: 'weapon',
+        name: def.nameZh || def.name,
+        price: PORTED_PRICES[id],
+        weaponId: id,
+        desc: '永久解锁 · ' + def.caliber + ' · 热键 ' + def.slot,
+      };
+    });
+  })();
+
   TOWER_BLOCKS.forEach(function (b) {
     const hitTxt = b.hits <= 0 ? '打不碎' : b.hits + ' 刀碎';
     CATALOG['blk_' + b.id] = {
@@ -157,6 +234,9 @@
     return {
       coins: 120,
       ownedWeapons: ['ar'],
+      ownedThrowables: ['frag'],
+      /** Guns for hotbar 1-2; THROW_SLOT holds the Q throwable. */
+      loadout: { 1: 'ar', 2: 'sg', 4: 'frag' },
       ownedModules: [],
       stock: stock,
       dailyFirstWinDate: '',
@@ -173,6 +253,17 @@
     if (owned.indexOf('ar') < 0) owned.unshift('ar');
     d.ownedWeapons = owned.filter(function (id, i, arr) {
       return id && arr.indexOf(id) === i;
+    });
+    const nades = Array.isArray(raw.ownedThrowables) ? raw.ownedThrowables.slice() : ['frag'];
+    if (nades.indexOf('frag') < 0) nades.unshift('frag');
+    d.ownedThrowables = nades.filter(function (id, i, arr) {
+      return id && arr.indexOf(id) === i;
+    });
+    const lo = raw.loadout && typeof raw.loadout === 'object' ? raw.loadout : {};
+    // Slot 3 used to be 精确射手. It folded into 主武器, so an old save's entry
+    // there is dropped rather than migrated — the gun is still theirs to re-pick.
+    [1, 2, THROW_SLOT].forEach(function (s) {
+      if (typeof lo[s] === 'string' && lo[s]) d.loadout[s] = lo[s];
     });
     const mods = Array.isArray(raw.ownedModules) ? raw.ownedModules.slice() : [];
     d.ownedModules = mods.filter(function (id, i, arr) {
@@ -243,6 +334,58 @@
     if (id === 'ar' || id === 'knife') return true;
     const m = getMeta();
     return m.ownedWeapons.indexOf(id) >= 0;
+  }
+
+  const LEGACY_SLOT_GUN = { 1: 'ar', 2: 'sg' };
+
+  function getLoadout() {
+    return getMeta().loadout;
+  }
+
+  /** The gun a hotbar slot should equip, falling back to the original three. */
+  function weaponForSlot(slot) {
+    const defs = (global.VF && global.VF.WEAPONS) || {};
+    const id = getLoadout()[slot];
+    if (id && defs[id]) return id;
+    return LEGACY_SLOT_GUN[slot] || 'ar';
+  }
+
+  /** Assign a gun to its hotbar slot. Slot is inferred from the def when omitted. */
+  function setLoadoutSlot(weaponId, slot) {
+    const defs = (global.VF && global.VF.WEAPONS) || {};
+    const cat = (global.VF && global.VF.WEAPON_CATALOG) || {};
+    const def = defs[weaponId] || cat[weaponId];
+    if (!def) return getLoadout();
+    slot = Number(slot) || def.slot || 1;
+    if (slot < 1 || slot > 2) return getLoadout();
+    if (!ownsWeapon(weaponId)) return getLoadout();
+    const m = getMeta();
+    m.loadout[slot] = weaponId;
+    saveMeta(m);
+    return m.loadout;
+  }
+
+  function ownsThrowable(id) {
+    if (!id) return false;
+    if (THROWABLE_PRICES[id] <= 0) return true;
+    return getMeta().ownedThrowables.indexOf(id) >= 0;
+  }
+
+  /** The throwable Q deploys with, falling back to the issued frag. */
+  function throwableForSlot() {
+    const cat = (global.VF && global.VF.THROWABLE_CATALOG) || {};
+    const id = getLoadout()[THROW_SLOT];
+    if (id && cat[id] && ownsThrowable(id)) return id;
+    return 'frag';
+  }
+
+  function setThrowableSlot(id) {
+    const cat = (global.VF && global.VF.THROWABLE_CATALOG) || {};
+    if (!id || !cat[id] || !ownsThrowable(id)) return getLoadout();
+    const m = getMeta();
+    m.loadout[THROW_SLOT] = id;
+    saveMeta(m);
+    return m.loadout;
   }
 
   function ownsModule(id) {
@@ -564,6 +707,10 @@
     if (total > 0) addCoins(total);
     else refreshLobbyCoins();
 
+    if (global.VF.Career && global.VF.Career.finish) {
+      global.VF.Career.finish(!!won);
+    }
+
     return { total: total, base: base, daily: daily, won: !!won };
   }
 
@@ -581,6 +728,21 @@
       }
       const m = getMeta();
       if (m.ownedWeapons.indexOf(item.weaponId) < 0) m.ownedWeapons.push(item.weaponId);
+      saveMeta(m);
+      refreshLobbyCoins();
+      return { ok: true, item: item };
+    }
+    if (item.kind === 'throwable') {
+      if (item.free || ownsThrowable(item.throwableId)) {
+        return { ok: false, reason: '已拥有 ' + item.name };
+      }
+      if (!trySpend(item.price)) {
+        return { ok: false, reason: '前线币不足（需要 ' + item.price + '）' };
+      }
+      const m = getMeta();
+      if (m.ownedThrowables.indexOf(item.throwableId) < 0) {
+        m.ownedThrowables.push(item.throwableId);
+      }
       saveMeta(m);
       refreshLobbyCoins();
       return { ok: true, item: item };
@@ -855,6 +1017,13 @@
     trySpend: trySpend,
     ownsWeapon: ownsWeapon,
     ownsModule: ownsModule,
+    getLoadout: getLoadout,
+    setLoadoutSlot: setLoadoutSlot,
+    weaponForSlot: weaponForSlot,
+    ownsThrowable: ownsThrowable,
+    throwableForSlot: throwableForSlot,
+    setThrowableSlot: setThrowableSlot,
+    THROW_SLOT: THROW_SLOT,
     zipCap: zipCap,
     previewTowerCost: previewTowerCost,
     commitTowerDesign: commitTowerDesign,

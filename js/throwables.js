@@ -13,8 +13,26 @@
 
   const KEY = 'KeyQ';
   const POOL = ['frag', 'semtex', 'molotov', 'flash', 'stun', 'smoke'];
+
+  /**
+   * What you actually deploy with: the arsenal's pick first, then the rest of
+   * what has been bought, so the in-match wheel can only reach owned kinds.
+   */
+  function carried() {
+    const E = VF.Economy;
+    const owned = POOL.filter(function (id) {
+      return !E || !E.ownsThrowable || E.ownsThrowable(id);
+    });
+    const pick = E && E.throwableForSlot ? E.throwableForSlot() : null;
+    const at = owned.indexOf(pick);
+    if (at > 0) {
+      owned.splice(at, 1);
+      owned.unshift(pick);
+    }
+    return owned.length ? owned : [POOL[0]];
+  }
   /** 验证用：不限量、局内可换。之后改回开局装配时关掉。 */
-  const DEBUG_UNLIMITED = true;
+  const DEBUG_UNLIMITED = false;
 
   const PHYS = {
     baseForce: 20.5, // 蓄满仰约 30° ≈ 28 m
@@ -35,10 +53,41 @@
   };
 
   const ANIM = {
-    draw: 0.22,
-    throw: 0.4,
-    releaseAt: 0.15,
-    recover: 0.2,
+    draw: 0.24,
+    throw: 0.52,
+    releaseAt: 0.34,
+    recover: 0.22,
+  };
+
+  /** First-person held size vs world mesh. 1 fills the lens; 0.48 read as a toy. */
+  const VIEW_ITEM_SCALE = 0.55;
+
+  /**
+   * Throw arc, in metres and radians. The load-up is the shoulder swinging the
+   * hand up and out behind the head — hauling it toward the lens instead just
+   * makes the fist fill the screen and drags the upper arm across the glass.
+   * The forward half is the whole viewmodel punching out, because rotating an
+   * anchored shoulder barely changes the hand's depth and on its own reads as a
+   * downward chop. Tuned for a ~110° sweep that parks the hand off the top for
+   * about 0.12s of anticipation, while still leaving frame through an edge at
+   * every point of it.
+   */
+  const ARC = {
+    backZ: 0.04,
+    backY: 0.06,
+    backPitch: 0.1,
+    backYaw: 0.05,
+    outZ: 0.5,
+    outY: 0.12,
+    outPitch: 0.2,
+    outYaw: 0.1,
+    cockRx: 0.82,
+    cockRy: 0.3,
+    cockRz: 0.18,
+    tossRx: 1.35,
+    tossRy: 0.55,
+    wristCock: 0.45,
+    wristSnap: 1.25,
   };
 
   const NAMES = {
@@ -131,6 +180,72 @@
       color: 0x889090,
     },
   };
+
+  /** Loadout-screen copy. Every number below is derived from DEFS, never typed twice. */
+  const THROW_META = {
+    frag: { kind: 'lethal', flavor: '拔销后计时起爆，落地会弹跳' },
+    semtex: { kind: 'lethal', flavor: '命中即粘，贴人贴墙都不会滚走' },
+    molotov: { kind: 'lethal', flavor: '落地碎裂成火池，用来封路和逼位' },
+    flash: { kind: 'tactical', flavor: '起爆致盲，正对着看时持续最久' },
+    stun: { kind: 'tactical', flavor: '压制移动与转向，给进攻开路' },
+    smoke: { kind: 'tactical', flavor: '扩散成烟幕，切断一条线的视野' },
+  };
+
+  const FUSE_FROM_LABEL = {
+    throw: '出手起算',
+    stick: '粘住起算',
+    impact: '触地即发',
+    land: '落地起算',
+  };
+
+  /**
+   * Lethals and tacticals have to share one stat panel, so both collapse onto a
+   * common shape: `potency` is damage for a lethal and effect seconds for a
+   * tactical, with the unit carried alongside instead of being assumed.
+   */
+  function throwableCatalog() {
+    const out = {};
+    Object.keys(THROW_META).forEach(function (id) {
+      const d = DEFS[id];
+      const meta = THROW_META[id];
+      if (!d) return;
+      const dps = d.tickDamage ? d.tickDamage / d.tickInterval : 0;
+      const entry = {
+        id: id,
+        name: NAMES[id] || id,
+        nameZh: NAMES[id] || id,
+        kind: meta.kind,
+        flavor: meta.flavor,
+        color: d.color,
+        collide: d.collide,
+        fuseFrom: d.fuseFrom,
+        fuseFromLabel: FUSE_FROM_LABEL[d.fuseFrom] || '',
+        fuseTime: d.fuseTime || 0,
+        radius: d.outerRadius || d.effectRadius || d.fireRadius || 0,
+        innerRadius: d.innerRadius || 0,
+        edgeDamage: d.minEdgeDamage || 0,
+        coreDamage: d.coreDamage || 0,
+        duration: d.areaDuration || d.maxBlind || d.maxStun || 0,
+        dps: dps,
+      };
+      if (dps) {
+        // A fire pool has no single hit to quote, so it is rated per second.
+        entry.potency = dps;
+        entry.potencyLabel = '灼烧';
+        entry.potencyUnit = '/秒';
+      } else if (meta.kind === 'lethal') {
+        entry.potency = d.maxDamage || 0;
+        entry.potencyLabel = '伤害';
+        entry.potencyUnit = '';
+      } else {
+        entry.potency = d.maxBlind || d.maxStun || d.areaDuration || 0;
+        entry.potencyLabel = d.maxBlind ? '致盲' : d.maxStun ? '压制' : '遮蔽';
+        entry.potencyUnit = '秒';
+      }
+      out[id] = entry;
+    });
+    return out;
+  }
 
   const state = {
     active: false,
@@ -809,20 +924,128 @@ void main() {
     return minC + t * (1 - minC);
   }
 
+  function orientFlatC4(mesh, nx, ny, nz) {
+    if (!mesh) return;
+    mesh.rotation.set(0, 0, 0);
+    if (ny > 0.5) {
+      // Floor — default orientation
+    } else if (ny < -0.5) {
+      mesh.rotation.x = Math.PI;
+    } else if (Math.abs(nx) > 0.5) {
+      mesh.rotation.z = nx > 0 ? -Math.PI / 2 : Math.PI / 2;
+    } else if (Math.abs(nz) > 0.5) {
+      mesh.rotation.x = nz > 0 ? Math.PI / 2 : -Math.PI / 2;
+    }
+  }
+
+  /**
+   * One voxel model per kind, sized to a common ~0.33 m envelope so the world
+   * projectile, the loadout preview and the first-person hold can all share it
+   * without per-kind scale tweaks.
+   */
   function makeMesh(id) {
+    if (id === 'semtex' && VF.makeC4Mesh) return VF.makeC4Mesh();
     const def = defOf(id);
     const g = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(id === 'molotov' ? 0.18 : 0.22, 0.28, 0.18),
-      new THREE.MeshLambertMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 0.18 })
-    );
-    g.add(body);
-    const cap = new THREE.Mesh(
-      new THREE.BoxGeometry(0.1, 0.08, 0.1),
-      new THREE.MeshLambertMaterial({ color: 0x222222 })
-    );
-    cap.position.y = 0.16;
-    g.add(cap);
+    g.name = 'Throwable_' + id;
+
+    function box(w, h, d, color, x, y, z, opts) {
+      const mat = Object.assign({ color: color }, opts || {});
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial(mat));
+      m.position.set(x || 0, y || 0, z || 0);
+      g.add(m);
+      return m;
+    }
+
+    const STEEL = 0x9fa5a3;
+    const BRASS = 0xc4a862;
+    const DARK = 0x2a2c2a;
+
+    /** Safety lever hugging the body with the pull ring stacked above it. */
+    function pinAssembly(sideX, topY, spoonLen) {
+      box(0.018, spoonLen, 0.044, STEEL, sideX, topY - spoonLen * 0.5, 0);
+      const ry = topY + 0.032;
+      box(0.036, 0.01, 0.01, BRASS, sideX, ry + 0.017, 0);
+      box(0.036, 0.01, 0.01, BRASS, sideX, ry - 0.017, 0);
+      box(0.01, 0.044, 0.01, BRASS, sideX - 0.017, ry, 0);
+      box(0.01, 0.044, 0.01, BRASS, sideX + 0.017, ry, 0);
+    }
+
+    /** Fuse housing screwed into the top of a grenade body. */
+    function fuseHead(y, w) {
+      box(w, 0.036, w, DARK, 0, y, 0);
+      box(w * 0.6, 0.016, w * 0.6, STEEL, 0, y + 0.024, 0);
+    }
+
+    if (id === 'frag') {
+      // M67: stepped boxes round off the ovoid, grooves suggest the segmenting.
+      const olive = def.color;
+      box(0.10, 0.03, 0.10, olive, 0, -0.12);
+      box(0.16, 0.05, 0.16, olive, 0, -0.08);
+      box(0.19, 0.11, 0.19, olive, 0, 0);
+      box(0.16, 0.05, 0.16, olive, 0, 0.08);
+      box(0.10, 0.03, 0.10, olive, 0, 0.12);
+      box(0.196, 0.014, 0.196, 0x33402a, 0, 0.032);
+      box(0.196, 0.014, 0.196, 0x33402a, 0, -0.032);
+      fuseHead(0.152, 0.07);
+      pinAssembly(0.095, 0.15, 0.13);
+    } else if (id === 'molotov') {
+      // Cocktail bottle: tinted glass over a visible fuel line, paper label,
+      // and a rag fuse stuffed in the neck that flops out to one side.
+      const glass = { transparent: true, opacity: 0.62 };
+      const glassCol = 0x5a7a55;
+      box(0.135, 0.028, 0.135, 0x40563d, 0, -0.104);
+      box(0.125, 0.13, 0.125, glassCol, 0, -0.03, 0, glass);
+      box(0.105, 0.104, 0.105, def.color, 0, -0.042, 0, {
+        emissive: def.color,
+        emissiveIntensity: 0.26,
+      });
+      box(0.10, 0.034, 0.10, glassCol, 0, 0.052, 0, glass);
+      box(0.055, 0.058, 0.055, glassCol, 0, 0.098, 0, glass);
+      box(0.07, 0.018, 0.07, glassCol, 0, 0.134, 0, glass);
+      box(0.084, 0.04, 0.006, 0xc9bd94, 0, -0.03, 0.064);
+      const cloth = 0xcdbe93;
+      box(0.042, 0.024, 0.042, cloth, 0, 0.15);
+      box(0.03, 0.036, 0.034, cloth, 0.014, 0.171);
+      box(0.026, 0.03, 0.028, cloth, 0.038, 0.183);
+      box(0.022, 0.024, 0.024, 0x93835c, 0.058, 0.177);
+    } else if (id === 'flash') {
+      // M84: light steel can whose six ports read from any spin angle.
+      box(0.145, 0.19, 0.145, 0xb4b8b2);
+      box(0.155, 0.022, 0.155, DARK, 0, 0.106);
+      box(0.155, 0.022, 0.155, DARK, 0, -0.106);
+      [-0.05, 0, 0.05].forEach(function (vy) {
+        box(0.024, 0.024, 0.006, DARK, 0, vy, 0.0745);
+        box(0.024, 0.024, 0.006, DARK, 0, vy, -0.0745);
+        box(0.006, 0.024, 0.024, DARK, 0.0745, vy, 0);
+        box(0.006, 0.024, 0.024, DARK, -0.0745, vy, 0);
+      });
+      fuseHead(0.136, 0.06);
+      pinAssembly(0.088, 0.134, 0.11);
+    } else if (id === 'stun') {
+      // Squatter and darker than the flash, with a lit band for the id colour.
+      box(0.155, 0.165, 0.155, 0x3a4048);
+      box(0.162, 0.038, 0.162, def.color, 0, 0.022, 0, {
+        emissive: def.color,
+        emissiveIntensity: 0.3,
+      });
+      box(0.165, 0.02, 0.165, DARK, 0, 0.093);
+      box(0.165, 0.02, 0.165, DARK, 0, -0.093);
+      fuseHead(0.122, 0.06);
+      pinAssembly(0.093, 0.12, 0.1);
+    } else {
+      // M18 smoke: tall canister, colour band, ports punched in the top plate.
+      box(0.135, 0.235, 0.135, 0x5f6a52);
+      box(0.142, 0.044, 0.142, def.color, 0, 0.05);
+      box(0.145, 0.02, 0.145, DARK, 0, 0.128);
+      box(0.145, 0.02, 0.145, DARK, 0, -0.128);
+      [-0.04, 0.04].forEach(function (px) {
+        box(0.026, 0.008, 0.026, 0x1e201e, px, 0.139, 0.04);
+        box(0.026, 0.008, 0.026, 0x1e201e, px, 0.139, -0.04);
+      });
+      fuseHead(0.155, 0.055);
+      pinAssembly(0.082, 0.152, 0.12);
+    }
     return g;
   }
 
@@ -902,7 +1125,7 @@ void main() {
       this.stop();
       if (!modeAllows()) return this;
       state.active = true;
-      state.equipped = POOL[0];
+      state.equipped = carried()[0];
       state.ammo = DEBUG_UNLIMITED ? 9999 : 1;
       state.holding = false;
       state.holdTime = 0;
@@ -1057,9 +1280,6 @@ void main() {
           e.preventDefault();
           return;
         }
-        if (!canCycle()) return;
-        e.preventDefault();
-        self._cycle(e.deltaY > 0 ? 1 : -1);
       }, { passive: false });
       document.addEventListener('mousedown', function (e) {
         const slot = e.target && e.target.closest && e.target.closest('#throw-hud [data-throw-id]');
@@ -1074,14 +1294,16 @@ void main() {
     _equip: function (id) {
       if (!id || !DEFS[id] || id === state.equipped) return;
       if (this.busy()) return;
+      if (carried().indexOf(id) < 0) return;
       state.equipped = id;
       this._syncHud();
     },
 
     _cycle: function (dir) {
-      const i = Math.max(0, POOL.indexOf(state.equipped));
-      const n = POOL.length;
-      const next = POOL[(i + (dir > 0 ? 1 : -1) + n) % n];
+      const pool = carried();
+      const i = Math.max(0, pool.indexOf(state.equipped));
+      const n = pool.length;
+      const next = pool[(i + (dir > 0 ? 1 : -1) + n) % n];
       this._equip(next);
     },
 
@@ -1092,6 +1314,7 @@ void main() {
       state.poseT = 0;
       state.wantThrow = false;
       state.thrown = false;
+      if (VF.UI && VF.UI.setHotbarSlot) VF.UI.setHotbarSlot('throw');
       this._showHeldVm();
       if (VF.Audio) VF.Audio.play('nade_pin');
     },
@@ -1218,6 +1441,10 @@ void main() {
       state.thrown = false;
       this._hidePreview();
       this._hideHeldVm();
+      const w = VF.game && VF.game.weapons;
+      if (w && VF.UI && VF.UI.setHotbarSlot && w.current && VF.WEAPONS && VF.WEAPONS[w.current]) {
+        VF.UI.setHotbarSlot(VF.WEAPONS[w.current].slot);
+      }
     },
 
     _showHeldVm: function () {
@@ -1228,7 +1455,9 @@ void main() {
         p._throwNode.parent !== p.camera ||
         p._throwNode.userData.classId !== p.classId ||
         !p._throwNode.userData.hip ||
-        !p._throwNode.userData.rArmRest;
+        !p._throwNode.userData.rArmRest ||
+        !p._throwNode.userData.lHandRest ||
+        !(p._throwNode.userData.parts && p._throwNode.userData.parts.holder);
       if (stale) {
         if (p._throwNode && p._throwNode.parent) p._throwNode.parent.remove(p._throwNode);
         if (VF.Soldier && VF.Soldier.createThrowableViewModel) {
@@ -1252,35 +1481,38 @@ void main() {
       this._applyThrowPose();
     },
 
+    /**
+     * Swap the held model for the equipped kind. The world mesh is reused rather
+     * than a hand-built stand-in, so what you hold is what leaves your hand.
+     */
     _styleHeldItem: function (node, id) {
       if (!node) return;
       const parts = node.userData.parts || {};
-      const isBottle = id === 'molotov';
-      const isCan = id === 'flash' || id === 'stun' || id === 'smoke';
-      if (parts.grenade) parts.grenade.visible = !isBottle && !isCan;
-      if (parts.bottle) parts.bottle.visible = isBottle;
-      if (parts.can) parts.can.visible = isCan;
-      const def = defOf(id);
-      const paint = function (obj) {
-        if (!obj) return;
-        obj.traverse(function (m) {
-          if (m.material && m.material.color && m.material.emissive) {
-            m.material.color.setHex(def.color);
-            m.material.emissive.setHex(def.color);
-            m.material.emissiveIntensity = 0.16;
-          }
-        });
-      };
-      const body = node.userData.body;
-      if (body && body.material && body.material.color) {
-        body.material.color.setHex(def.color);
-        if (body.material.emissive) {
-          body.material.emissive.setHex(def.color);
-          body.material.emissiveIntensity = 0.2;
+      const item = node.userData.item;
+      const holder = parts.holder;
+      const isC4 = id === 'semtex';
+      if (holder && holder.userData.kind !== id) {
+        for (let i = holder.children.length - 1; i >= 0; i--) {
+          const child = holder.children[i];
+          holder.remove(child);
+          child.traverse(function (m) {
+            if (m.geometry) m.geometry.dispose();
+            if (m.material && m.material.dispose) m.material.dispose();
+          });
         }
+        const mesh = makeMesh(id);
+        // Viewmodels sit inside the near plane, so culling has to be off or the
+        // whole item pops out at certain angles.
+        mesh.traverse(function (m) {
+          m.frustumCulled = false;
+        });
+        holder.add(mesh);
+        holder.userData.kind = id;
       }
-      if (isBottle) paint(parts.bottle);
-      if (isCan) paint(parts.can);
+      if (item) {
+        item.scale.setScalar(VIEW_ITEM_SCALE);
+        item.rotation.set(isC4 ? 0.12 : 0, isC4 ? 0.4 : -0.9, 0);
+      }
     },
 
     _hideHeldItem: function (hide) {
@@ -1323,58 +1555,78 @@ void main() {
       let drz = 0;
       let r = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
       let l = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
+      let rh = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
+      let lh = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
+      // The arms hang off anchored shoulders, so every phase below swings them
+      // by rotation only — translating an arm walks its shoulder in from off
+      // frame and the limb reads as a slab floating beside the lens.
       if (state.pose === 'draw') {
-        const k = sm(state.poseT / ANIM.draw);
-        dx = 0.03 * (1 - k);
-        dy = -0.26 + k * 0.26;
-        dz = 0.1 - k * 0.1;
-        drx = 0.28 - k * 0.28;
-        r.z = 0.04 * (1 - k);
-        r.rx = 0.18 * (1 - k);
-        l.y = -0.08 * (1 - k);
+        // Rest pose is already the 平举 cook. Draw lifts into it from a holster.
+        const u = 1 - sm(state.poseT / ANIM.draw);
+        dy = -0.12 * u;
+        dz = 0.06 * u;
+        r.rx = -0.72 * u;
+        r.ry = 0.14 * u;
+        l.rx = -0.78 * u;
+        l.ry = -0.12 * u;
+        lh.rx = 0.3 * u;
       } else if (state.pose === 'charge') {
         const c = chargeRatio();
         dy = c * 0.02;
-        dz = c * 0.03;
-        drx = c * 0.08;
-        r.z = c * 0.03;
-        r.rx = c * 0.12;
-        l.z = c * 0.02;
+        r.rx = c * 0.16;
+        r.ry = c * 0.06;
+        rh.rx = c * 0.12;
+        l.rx = -c * 0.03;
+        lh.ry = c * 0.06;
       } else if (state.pose === 'throw') {
         const k = Math.max(0, Math.min(1, state.poseT / ANIM.throw));
-        const cock = k < 0.32 ? sm(k / 0.32) : 1;
-        const toss = k < 0.32 ? 0 : sm((k - 0.32) / 0.68);
-        const follow = Math.max(0, (toss - 0.4) / 0.6);
-        dx = toss * 0.04;
-        dy = cock * 0.02 - follow * 0.08;
-        dz = -toss * 0.06;
-        drx = cock * 0.06 - toss * 0.12;
-        dry = -toss * 0.04;
-        r.z = cock * 0.05 - toss * 0.22;
-        r.y = cock * 0.03 + toss * 0.04 - follow * 0.38;
-        r.x = toss * 0.02 + follow * 0.06;
-        r.rx = cock * 0.32 - toss * 0.7 - follow * 0.2;
-        r.ry = -toss * 0.08;
-        r.rz = -toss * 0.1;
-        l.y = -toss * 0.28 - follow * 0.18;
-        l.x = -toss * 0.1;
-        l.z = toss * 0.06;
-        l.rx = toss * 0.25;
-        l.rz = toss * 0.12;
+        // A throw has to be seen loading up before it goes, so the wind-up eases
+        // in over its own third of the clip and the release is an ease-out whip.
+        const cock = k < 0.38 ? sm(k / 0.38) : 1;
+        const raw = k < 0.38 ? 0 : (k - 0.38) / 0.62;
+        const toss = 1 - Math.pow(1 - raw, 2.6);
+        const follow = Math.max(0, (raw - 0.45) / 0.55);
+        dy = cock * ARC.backY - toss * ARC.outY;
+        dz = cock * ARC.backZ - toss * ARC.outZ + follow * ARC.outZ * 0.24;
+        drx = cock * ARC.backPitch - toss * ARC.outPitch;
+        dry = cock * ARC.backYaw - toss * ARC.outYaw;
+        // Right: load the hand up and out behind the ear, then sweep it down and
+        // through past the crosshair, wrist snapping open at the release.
+        r.rx = 0.16 + cock * ARC.cockRx - toss * ARC.tossRx;
+        r.ry = 0.06 + cock * ARC.cockRy - toss * ARC.tossRy;
+        r.rz = -cock * ARC.cockRz + toss * ARC.cockRz * 0.43;
+        rh.rx = 0.12 + cock * ARC.wristCock - toss * ARC.wristSnap;
+        rh.ry = cock * 0.12 - toss * 0.3;
+        // Left simply folds away as the throw goes. Cancelling the root's punch
+        // off its shoulder keeps it from being carried forward with the right
+        // arm, which looks like the off hand is throwing something too.
+        l.z = -dz;
+        l.y = -dy;
+        l.rx = -0.03 - toss * 0.95;
+        l.ry = -toss * 0.34;
+        lh.rx = -toss * 0.45;
+        lh.rz = toss * 0.66;
       } else if (state.pose === 'recover') {
+        // Blends from the throw's last frame to the holster, expressed off the
+        // same ARC values — hand-copied start angles drift the moment the arc is
+        // retuned and pop the hands a frame after release.
         const k = sm(state.poseT / ANIM.recover);
-        dx = 0.04 + k * 0.08;
-        dy = -0.06 - k * 0.38;
-        dz = -0.06 + k * 0.16;
-        drx = -0.06 + k * 0.2;
-        dry = -0.04;
-        r.y = -0.31 - k * 0.28;
-        r.z = -0.17 + k * 0.12;
-        r.x = 0.08 + k * 0.06;
-        r.rx = -0.58 + k * 0.2;
-        l.y = -0.46 - k * 0.22;
-        l.x = -0.1 - k * 0.08;
-        l.rx = 0.25 + k * 0.15;
+        const mix = function (a, b) { return a + (b - a) * k; };
+        dy = mix(ARC.backY - ARC.outY, -0.2);
+        dz = mix(ARC.backZ - ARC.outZ * 0.76, -0.02);
+        drx = mix(ARC.backPitch - ARC.outPitch, 0);
+        dry = mix(ARC.backYaw - ARC.outYaw, 0);
+        r.rx = mix(0.16 + ARC.cockRx - ARC.tossRx, -0.97);
+        r.ry = mix(0.06 + ARC.cockRy - ARC.tossRy, 0.12);
+        r.rz = mix(-ARC.cockRz * 0.57, 0);
+        rh.rx = mix(0.12 + ARC.wristCock - ARC.wristSnap, -0.12);
+        rh.ry = mix(-0.18, 0);
+        l.z = -dz;
+        l.y = -dy;
+        l.rx = mix(-0.98, -1.1);
+        l.ry = mix(-0.34, -0.14);
+        lh.rx = mix(-0.45, -0.15);
+        lh.rz = mix(0.66, 0.26);
       }
       const sway = (p._swayBlend || 0) * (state.pose === 'charge' ? 0.55 : 0.15);
       const t = p._bobTime || 0;
@@ -1385,6 +1637,8 @@ void main() {
       node.rotation.set(hip.rx + drx, hip.ry + dry, hip.rz + drz);
       poseArm(node.userData.rArm, node.userData.rArmRest, r.x, r.y, r.z, r.rx, r.ry, r.rz);
       poseArm(node.userData.lArm, node.userData.lArmRest, l.x, l.y, l.z, l.rx, l.ry, l.rz);
+      poseArm(node.userData.rHand, node.userData.rHandRest, rh.x, rh.y, rh.z, rh.rx, rh.ry, rh.rz);
+      poseArm(node.userData.lHand, node.userData.lHandRest, lh.x, lh.y, lh.z, lh.rx, lh.ry, lh.rz);
     },
 
     _consume: function () {
@@ -1464,6 +1718,9 @@ void main() {
               g.mesh.rotation.x += spin;
               g.mesh.rotation.z += spin * 0.62;
             }
+          }
+          if (g.id === 'semtex' && g.mesh.userData.led) {
+            g.mesh.userData.led.visible = Math.sin(performance.now() * 0.02) > 0;
           }
         }
       }
@@ -1575,6 +1832,7 @@ void main() {
             g.z = hit.z;
             this._settleNade(g, def);
             g.fuse = def.fuseTime;
+            orientFlatC4(g.mesh, hit.nx, hit.ny, hit.nz);
             if (VF.Audio) VF.Audio.play('semtex_stick');
             return;
           }
@@ -2732,14 +2990,19 @@ void main() {
       if (!state.slots) {
         state.slots = el.querySelectorAll('[data-throw-id]');
       }
+      if (VF.UI && VF.UI.syncThrowSlot) VF.UI.syncThrowSlot();
       if (!state.active || !state.equipped) {
         el.classList.add('hidden');
         return;
       }
       el.classList.remove('hidden');
+      const pool = carried();
       for (let i = 0; i < state.slots.length; i++) {
         const slot = state.slots[i];
-        const selected = slot.getAttribute('data-throw-id') === state.equipped;
+        const id = slot.getAttribute('data-throw-id');
+        // An unbought kind is not carried, so it should not take up strip space.
+        slot.classList.toggle('hidden', pool.indexOf(id) < 0);
+        const selected = id === state.equipped;
         slot.classList.toggle('selected', selected);
         slot.classList.toggle('holding', selected && (state.holding || state.pose === 'draw' || state.pose === 'charge'));
         const cook = slot.querySelector('[data-throw-cook]');
@@ -2850,5 +3113,32 @@ void main() {
     },
   };
 
+  /** Hotbar Q slot mirrors these. */
+  Api.isActive = function () {
+    return !!state.active;
+  };
+  Api.equipped = function () {
+    return state.active ? state.equipped : null;
+  };
+  Api.remaining = function () {
+    return state.active ? state.ammo : 0;
+  };
+  /** Respawn / new round: back to a full carry of the equipped lethal. */
+  Api.refill = function () {
+    if (!state.active) return;
+    if (state.pose && state.pose !== 'idle' && this._abortPose) this._abortPose();
+    state.ammo = DEBUG_UNLIMITED ? 9999 : 1;
+    this._syncHud();
+  };
+
+  /** Loadout screen reads the stats and builds a preview from the world mesh. */
+  Api.catalog = throwableCatalog;
+  Api.order = function () {
+    return POOL.slice();
+  };
+  Api.carried = carried;
+  Api.makeMesh = makeMesh;
+
   VF.Throwables = Api;
+  VF.THROWABLE_CATALOG = throwableCatalog();
 })(typeof window !== 'undefined' ? window : globalThis);

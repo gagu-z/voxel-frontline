@@ -122,9 +122,10 @@
       this.hideResult();
     },
 
-    /** The build hotbar slots are dead weight when building is off. */
-    _setBuildSlots: function (visible) {
-      if (VF.UI && VF.UI.setArenaKnifeSlot) VF.UI.setArenaKnifeSlot(!visible);
+    /** The build hotbar slots and resource counters are dead weight here. */
+    _setBuildSlots: function () {
+      if (VF.UI && VF.UI.syncHotbarLayout) VF.UI.syncHotbarLayout();
+      if (VF.UI && VF.UI.syncBuildHud) VF.UI.syncBuildHud();
     },
 
     _bind: function () {
@@ -283,6 +284,15 @@
     /* ────────────────────────── result panel ──────────────────────── */
 
     showResult: function (match, won) {
+      const self = this;
+      const reveal = function () {
+        self._revealResult(match, won);
+      };
+      if (VF.WeaponInspect && VF.WeaponInspect.play) VF.WeaponInspect.play(reveal);
+      else reveal();
+    },
+
+    _revealResult: function (match, won) {
       const e = els();
       if (!e || !e.result) return;
       const draw = !match.winner;

@@ -1,5 +1,9 @@
 /**
- * audio.js — Procedural SFX + light ambient via Web Audio API (no asset files).
+ * audio.js — Procedural SFX + light ambient via Web Audio API.
+ *
+ * Every sound has a synthesized fallback, so the game is playable with no
+ * asset files at all. Dropping real recordings into assets/sfx/ and listing
+ * them in assets/sfx/index.json overrides the synth per sound name.
  */
 (function (global) {
   'use strict';
@@ -21,6 +25,9 @@
     _queue: [],
     _volMul: 1,
     _worldShotAt: 0,
+    _samples: null,
+    _sampleGain: null,
+    _bankState: 'idle',
 
     init() {
       try {
@@ -44,6 +51,7 @@
       if (!ctx) return Promise.resolve(false);
       const start = () => {
         this.unlocked = true;
+        this.loadSampleBank();
         if (this.enabled && !this.inMatch) this._startMusic();
         this._flushQueue();
         return true;
@@ -135,6 +143,120 @@
       }, ms);
     },
 
+    /**
+     * Sample bank — assets/sfx/index.json maps a sound name to one or more
+     * layers, so a recorded hit can keep the layered shape of the synth:
+     *   "molotov": [
+     *     { "file": "throwables/glass_smash.ogg", "gain": 0.9 },
+     *     { "file": "throwables/fire_whoosh.ogg", "gain": 0.7, "delay": 0.04 }
+     *   ]
+     * A bare string or single object works too. Layers that fail to load are
+     * dropped; a name with no surviving layer keeps its synthesized version.
+     *
+     * Per-layer shaping, so stock recordings can be re-voiced without an audio
+     * editor: gain, delay, rate (playback speed = pitch), lowpass / highpass
+     * corner in Hz, and dur to cut a long tail short with a fade.
+     */
+    loadSampleBank() {
+      if (this._bankState !== 'idle') return;
+      const ctx = this._ensure();
+      if (!ctx) return;
+      this._bankState = 'loading';
+      this._samples = this._samples || {};
+
+      const num = (v, dflt) => (v == null ? dflt : v);
+      const decode = (spec) => {
+        const file = typeof spec === 'string' ? spec : spec && spec.file;
+        if (!file) return Promise.resolve(null);
+        const L = {
+          gain: num(spec && spec.gain, 1),
+          delay: num(spec && spec.delay, 0),
+          rate: num(spec && spec.rate, 1),
+          lowpass: num(spec && spec.lowpass, 0),
+          highpass: num(spec && spec.highpass, 0),
+          dur: num(spec && spec.dur, 0),
+        };
+        return fetch('assets/sfx/' + file)
+          .then((r) => (r.ok ? r.arrayBuffer() : null))
+          .then((ab) => (ab ? ctx.decodeAudioData(ab.slice(0)) : null))
+          .then((buf) => {
+            if (!buf) return null;
+            L.buf = buf;
+            return L;
+          })
+          .catch(function () { return null; });
+      };
+
+      fetch('assets/sfx/index.json')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((idx) => {
+          this._bankState = 'ready';
+          const map = (idx && idx.sfx) || {};
+          Object.keys(map).forEach((name) => {
+            const specs = Array.isArray(map[name]) ? map[name] : [map[name]];
+            Promise.all(specs.map(decode)).then((layers) => {
+              const ok = layers.filter(Boolean);
+              if (ok.length) this._samples[name] = ok;
+            });
+          });
+        })
+        .catch(() => {
+          this._bankState = 'ready';
+        });
+    },
+
+    /** One-shot of a sampled sound, honoring the current distance/volume mix. */
+    _playSample(name, volMul) {
+      const ctx = this._ensure();
+      const layers = this._samples && this._samples[name];
+      if (!ctx || !layers || !layers.length) return false;
+      const vol = volMul == null ? 1 : volMul;
+      const now = ctx.currentTime;
+      let played = 0;
+      for (let i = 0; i < layers.length; i++) {
+        const L = layers[i];
+        try {
+          const src = ctx.createBufferSource();
+          src.buffer = L.buf;
+          if (L.rate && L.rate !== 1) src.playbackRate.value = L.rate;
+
+          let node = src;
+          if (L.highpass > 0) {
+            const hp = ctx.createBiquadFilter();
+            hp.type = 'highpass';
+            hp.frequency.value = L.highpass;
+            node.connect(hp);
+            node = hp;
+          }
+          if (L.lowpass > 0) {
+            const lp = ctx.createBiquadFilter();
+            lp.type = 'lowpass';
+            lp.frequency.value = L.lowpass;
+            node.connect(lp);
+            node = lp;
+          }
+
+          const g = ctx.createGain();
+          const peak = L.gain * vol;
+          g.gain.value = peak;
+          node.connect(g);
+          g.connect(this.sfx);
+
+          const at = now + (L.delay || 0);
+          src.start(at);
+          if (L.dur > 0) {
+            // Fade the tail instead of cutting it, so trimming never clicks.
+            const fade = Math.min(0.08, L.dur * 0.35);
+            g.gain.setValueAtTime(peak, at + L.dur - fade);
+            g.gain.linearRampToValueAtTime(0.0001, at + L.dur);
+            src.stop(at + L.dur + 0.01);
+          }
+          played++;
+        } catch (e) { /* skip this layer */ }
+      }
+      return played > 0;
+    },
+
     play(name, opts) {
       if (!this.enabled) return;
       const ctx = this._ensure();
@@ -143,6 +265,7 @@
       const volMul = opts && opts.volMul != null ? opts.volMul : 1;
       const run = () => {
         if ((this._stamp || 0) !== stamp) return;
+        if (this._playSample(name, volMul)) return;
         this._volMul = volMul;
         const fn = SOUNDS[name];
         if (fn) fn(this, opts || {});
@@ -344,7 +467,14 @@
       }
       if (this._musicLoading) return;
       this._musicLoading = true;
-      const paths = ['assets/music/theme.mp3', 'assets/music/theme.wav'];
+      // Menu/hub BGM: drop any one of these in and it loops automatically.
+      const paths = [
+        'assets/music/menu.mp3',
+        'assets/music/menu.ogg',
+        'assets/music/theme.mp3',
+        'assets/music/theme.ogg',
+        'assets/music/theme.wav',
+      ];
       const tryLoad = (i) => {
         if (i >= paths.length) {
           this._musicLoading = false;
@@ -602,6 +732,27 @@
       A.tone(720 + Math.random() * 40, 0.035, 'triangle', 0.1);
       A.tone(980, 0.025, 'sine', 0.06);
       A.noiseBurst(0.02, 0.05, 2000, 8000);
+    },
+    /** Doodle switchWeapon: short bandpass rustle on draw. */
+    switchWeapon(A) {
+      const ctx = A.ctx;
+      if (!ctx) return;
+      const t0 = ctx.currentTime;
+      const dur = 0.05;
+      const mul = A._volMul == null ? 1 : A._volMul;
+      const src = ctx.createBufferSource();
+      src.buffer = A._noiseBuffer(Math.max(dur + 0.05, 0.1));
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1800;
+      bp.Q.value = 1.5;
+      const g = ctx.createGain();
+      A._env(g, t0, 0.004, 0.25 * mul, dur * 0.25, 0.08 * mul, dur * 0.7);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(A.sfx);
+      src.start(t0);
+      src.stop(t0 + dur + 0.03);
     },
     confirm(A) {
       A.tone(392, 0.05, 'triangle', 0.11);
